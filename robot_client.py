@@ -284,7 +284,6 @@ def client_update(data):
             import re
             config_content = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = "{current_robot_name}"', config_content)
 
-        # 수정된 내용을 파일에 쓰기
         with open(config_file_path, 'w', encoding='utf-8') as f:
             f.write(config_content)
 
