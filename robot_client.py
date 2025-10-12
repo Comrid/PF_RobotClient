@@ -221,18 +221,62 @@ def heartbeat_thread():
                 print(f"하트비트 전송 실패: {e}")
         time.sleep(10)
 
-def main():
+@sio.event
+def update_and_restart(data):
+    import subprocess
+    import os
+    from pathlib import Path
+
+    try:
+        script_dir = Path(__file__).parent.absolute()
+        print(f"📥 Git 업데이트 시작... (작업 디렉토리: {script_dir})")
+        result = subprocess.run(['git', 'pull', 'origin', 'main'],
+                              capture_output=True, text=True, cwd=str(script_dir))
+
+        if result.returncode != 0:
+            sio.emit('robot_stderr', {
+                'session_id': 'system',
+                'output': f"❌ Git 업데이트 실패: {result.stderr}"
+            })
+            return
+
+        sio.emit('robot_stdout', {
+            'session_id': 'system',
+            'output': f"✅ Git 업데이트 성공: {result.stdout}"
+        })
+
+        # 2. 서비스 재시작
+        print("🔄 서비스 재시작 중...")
+        restart_result = subprocess.run(['sudo', 'systemctl', 'restart', 'robot_client.service'],
+                                      capture_output=True, text=True, timeout=10)
+
+        if restart_result.returncode == 0:
+            sio.emit('robot_stdout', {
+                'session_id': 'system',
+                'output': "✅ 서비스 재시작 완료 - 업데이트 적용됨"
+            })
+        else:
+            sio.emit('robot_stderr', {
+                'session_id': 'system',
+                'output': f"❌ 서비스 재시작 실패: {restart_result.stderr}"
+            })
+
+    except subprocess.TimeoutExpired:
+        sio.emit('robot_stderr', {
+            'session_id': 'system',
+            'output': "❌ 업데이트/재시작 타임아웃"
+        })
+    except Exception as e:
+        sio.emit('robot_stderr', {
+            'session_id': 'system',
+            'output': f"❌ 업데이트 중 오류: {str(e)}"
+        })
+
+if __name__ == "__main__":
     try:
         sio.connect(SERVER_URL)
-
-        # 하트비트 스레드 시작
         heartbeat_thread_obj = threading.Thread(target=heartbeat_thread, daemon=True)
         heartbeat_thread_obj.start()
-
-        # 연결 유지
-        print("\n⚡ 로봇 클라이언트 실행 중... (Ctrl+C로 종료)")
-        print("💡 서버 웹페이지에서 코드를 작성하고 실행해보세요!")
-
         while True:
             time.sleep(1)
             if not sio.connected:
@@ -241,5 +285,3 @@ def main():
     except KeyboardInterrupt:
         print("KeyboardInterrupt")
         sio.disconnect()
-
-main()
