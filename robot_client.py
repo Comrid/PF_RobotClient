@@ -231,6 +231,7 @@ def client_update(data):
     try:
         script_dir = Path(__file__).parent.absolute()
         print(f"📥 Git 업데이트 시작... (작업 디렉토리: {script_dir})")
+        print(f"현재 버전: {ROBOT_VERSION}")
 
         # 1. 현재 ROBOT_ID와 ROBOT_NAME 저장
         print("💾 현재 로봇 설정 저장 중...")
