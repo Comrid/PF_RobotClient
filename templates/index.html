@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>로봇 설정</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: white; padding: 20px 0; }
+        .container { text-align: center; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); max-width: 500px; width: 90%; }
+        .title { font-size: 2rem; margin-bottom: 20px; font-weight: 600; }
+        .description { font-size: 1.1rem; margin-bottom: 30px; opacity: 0.9; line-height: 1.6; }
+        .setup-form { text-align: left; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label, h3 { display: block; margin-bottom: 12px; font-weight: 500; font-size: 1.1rem; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px; }
+        .form-input { width: 100%; padding: 15px; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 10px; background: rgba(255, 255, 255, 0.1); color: white; font-size: 1rem; transition: all 0.3s ease; backdrop-filter: blur(10px); }
+        .btn { border: none; border-radius: 15px; color: white; padding: 18px 36px; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: all 0.3s ease; width: 100%; margin-bottom: 15px; }
+        .connect-btn { background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%); }
+        .status { margin-top: 20px; font-size: 0.9rem; opacity: 0.8; min-height: 20px; }
+        .loading { display: none; margin-top: 20px; }
+        .spinner { border: 3px solid rgba(255, 255, 255, 0.3); border-top: 3px solid white; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">로봇 설정</h1>
+        <p class="description">
+            로봇을 웹 에디터와 연동하기 위해<br>로봇 이름과 와이파이 정보를 입력하세요.
+        </p>
+
+        <div class="setup-form">
+            <h3>로봇 및 네트워크 설정</h3>
+            <div class="form-group">
+                <label class="form-label" for="robot_name">로봇 이름</label>
+                <input type="text" class="form-input" id="robot_name" name="robot_name" placeholder="연동에 사용할 로봇 이름" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="ssid">WiFi 이름 (SSID)</label>
+                <input type="text" class="form-input" id="ssid" name="ssid" placeholder="와이파이 이름" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="password">WiFi 비밀번호</label>
+                <input type="password" class="form-input" id="password" name="password" placeholder="8자 이상 입력하세요" required minlength="8" maxlength="63">
+            </div>
+            <button class="btn connect-btn" id="setupBtn" onclick="setupRobot()">로봇 설정 완료</button>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div id="loadingText"></div>
+        </div>
+        
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+
+        function showLoading(message) {
+            document.getElementById('loadingText').textContent = message;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('status').textContent = '';
+            document.querySelectorAll('button').forEach(btn => btn.disabled = true);
+        }
+
+        function showStatus(message, isError = false) {
+            document.getElementById('loading').style.display = 'none';
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.style.color = isError ? '#ef4444' : '#4ade80';
+            document.querySelectorAll('button').forEach(btn => btn.disabled = false);
+        }
+
+
+        function setupRobot() {
+            const robotName = document.getElementById('robot_name').value.trim();
+            const ssid = document.getElementById('ssid').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            if (!robotName || !ssid || !password) {
+                showStatus('로봇 이름, WiFi 이름, 비밀번호를 모두 입력해주세요.', true);
+                return;
+            }
+
+            // WiFi 비밀번호 길이 검증
+            if (password.length < 8) {
+                showStatus('WiFi 비밀번호는 8자 이상이어야 합니다.', true);
+                return;
+            }
+            if (password.length > 63) {
+                showStatus('WiFi 비밀번호는 63자 이하여야 합니다.', true);
+                return;
+            }
+            if (!/^[a-zA-Z0-9]+$/.test(robotName)) {
+                showStatus('로봇 이름은 영문자와 숫자만 사용할 수 있습니다.', true);
+                return;
+            }
+            if (robotName.length < 3) {
+                showStatus('로봇 이름은 3자 이상이어야 합니다.', true);
+                return;
+            }
+            if (robotName.length > 10) {
+                showStatus('로봇 이름은 10자 이하여야 합니다.', true);
+                return;
+            }
+
+            showLoading('로봇을 설정하고 서버에 등록합니다...');
+            fetch('/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    robot_name: robotName,
+                    ssid: ssid,
+                    password: password
+                })
+            })
+            .then(handleResponse)
+            .catch(handleError);
+        }
+
+        function handleResponse(response) {
+            return response.json().then(data => {
+                if (data.success) {
+                    if (data.robot_name) {
+                        showStatus("설정 완료! 3초 후 웹 에디터로 이동합니다...", false);
+                        setTimeout(() => {
+                            showStatus("설정 완료! 2초 후 웹 에디터로 이동합니다...", false);
+                            setTimeout(() => {
+                                showStatus("설정 완료! 1초 후 웹 에디터로 이동합니다...", false);
+                                setTimeout(() => {
+                                    location.replace("https://pathfinder-kit.duckdns.org");
+                                }, 1000);
+                            }, 1000);
+                        }, 1000);
+                    } else {
+                        showLoading(data.message);
+                    }
+                } else {
+                    showStatus('오류: ' + data.error, true);
+                }
+            });
+        }
+
+        function handleError(error) {
+            showStatus('요청 오류가 발생했습니다: ' + error.message, true);
+        }
+
+    </script>
+</body>
+</html>
