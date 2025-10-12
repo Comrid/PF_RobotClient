@@ -5,7 +5,7 @@ import threading
 from traceback import format_exc
 import socketio
 import time
-from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, HARDWARE_ENABLED
+from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, HARDWARE_ENABLED, ROBOT_VERSION
 try:
     from findee import Findee
 except Exception:
@@ -34,7 +34,8 @@ def connect():
     sio.emit('robot_connected', { # 로봇 > 서버
         'robot_id': ROBOT_ID,
         'robot_name': ROBOT_NAME,
-        'hardware_enabled': HARDWARE_ENABLED
+        'hardware_enabled': HARDWARE_ENABLED,
+        'robot_version': ROBOT_VERSION
     })
 
 @sio.event
@@ -222,7 +223,7 @@ def heartbeat_thread():
         time.sleep(10)
 
 @sio.event
-def update_and_restart(data):
+def client_update(data):
     import subprocess
     import os
     from pathlib import Path
