@@ -276,9 +276,13 @@ def client_update(data):
 
         # ROBOT_ID와 ROBOT_NAME 복원
         if current_robot_id is not None:
-            config_content = config_content.replace('ROBOT_ID = None', f'ROBOT_ID = "{current_robot_id}"')
+            # 기존 값이 있든 없든 현재 값으로 교체
+            import re
+            config_content = re.sub(r'ROBOT_ID\s*=\s*[^\n]+', f'ROBOT_ID = "{current_robot_id}"', config_content)
         if current_robot_name is not None:
-            config_content = config_content.replace('ROBOT_NAME = None', f'ROBOT_NAME = "{current_robot_name}"')
+            # 기존 값이 있든 없든 현재 값으로 교체
+            import re
+            config_content = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = "{current_robot_name}"', config_content)
 
         # 수정된 내용을 파일에 쓰기
         with open(config_file_path, 'w', encoding='utf-8') as f:
