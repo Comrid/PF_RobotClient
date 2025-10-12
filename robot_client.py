@@ -231,6 +231,25 @@ def client_update(data):
     try:
         script_dir = Path(__file__).parent.absolute()
         print(f"📥 Git 업데이트 시작... (작업 디렉토리: {script_dir})")
+
+        # 1. 현재 ROBOT_ID와 ROBOT_NAME 저장
+        print("💾 현재 로봇 설정 저장 중...")
+        current_robot_id = ROBOT_ID
+        current_robot_name = ROBOT_NAME
+        print(f"📋 저장된 설정 - ID: {current_robot_id}, Name: {current_robot_name}")
+
+        # 2. 로컬 변경사항을 stash로 저장
+        print("💾 로컬 변경사항을 stash로 저장 중...")
+        stash_result = subprocess.run(['git', 'stash', 'push', '-m', '"Auto stash before update"'],
+                                    capture_output=True, text=True, cwd=str(script_dir))
+
+        if stash_result.returncode == 0:
+            print("✅ 로컬 변경사항이 stash로 저장되었습니다.")
+        else:
+            print(f"⚠️ Stash 저장 중 경고: {stash_result.stderr}")
+
+        # 3. 강제로 pull 실행
+        print("🔄 강제 Git pull 실행 중...")
         result = subprocess.run(['git', 'pull', 'origin', 'main'],
                               capture_output=True, text=True, cwd=str(script_dir))
 
@@ -246,7 +265,27 @@ def client_update(data):
             'output': f"✅ Git 업데이트 성공: {result.stdout}"
         })
 
-        # 2. 서비스 재시작
+        # 4. 저장된 로봇 설정 복원
+        print("🔄 저장된 로봇 설정 복원 중...")
+        config_file_path = script_dir / 'robot_config.py'
+
+        # robot_config.py 파일 읽기
+        with open(config_file_path, 'r', encoding='utf-8') as f:
+            config_content = f.read()
+
+        # ROBOT_ID와 ROBOT_NAME 복원
+        if current_robot_id is not None:
+            config_content = config_content.replace('ROBOT_ID = None', f'ROBOT_ID = "{current_robot_id}"')
+        if current_robot_name is not None:
+            config_content = config_content.replace('ROBOT_NAME = None', f'ROBOT_NAME = "{current_robot_name}"')
+
+        # 수정된 내용을 파일에 쓰기
+        with open(config_file_path, 'w', encoding='utf-8') as f:
+            f.write(config_content)
+
+        print(f"✅ 로봇 설정 복원 완료 - ID: {current_robot_id}, Name: {current_robot_name}")
+
+        # 5. 서비스 재시작
         print("🔄 서비스 재시작 중...")
         restart_result = subprocess.run(['sudo', 'systemctl', 'restart', 'robot_client.service'],
                                       capture_output=True, text=True, timeout=10)
