@@ -42,6 +42,14 @@ def update_robot_config(robot_name, robot_id):
 def captive_probe_redirect():
     return redirect(SERVER_URL, code=302)
 
+@app.route("/redirect")
+def msft_redirect():
+    return redirect("/", code=302)
+
+@app.route("/hotspot-detect.html")
+def apple_redirect():
+    return redirect("/", code=302)
+
 @app.route('/connect', methods=['POST'])
 def setup_robot():
     try:
