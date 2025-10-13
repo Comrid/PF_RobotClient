@@ -11,26 +11,15 @@ try:
 except Exception:
     Findee = None
 
+# 서버 연결 객체
+sio = socketio.Client()
 stop_flag = False
 running_thread = None
-
-sio = socketio.Client()
-
-robot_status = {
-    'connected': False,
-    'executing_code': False,
-    'current_session': None
-}
-
-Findee = None
 
 #region 로봇 연결 이벤트
 # 연결 성공: 로봇 등록 요청
 @sio.event
 def connect():
-    robot_status['connected'] = True
-
-    # 서버에 로봇 등록
     print("📤 서버에 로봇 등록 요청 전송...")
     print(f"🔍 로봇 정보 - ID: {ROBOT_ID}, Name: {ROBOT_NAME}, Version: {ROBOT_VERSION}")
     print(f"🔍 세션 ID: {sio.sid}")
