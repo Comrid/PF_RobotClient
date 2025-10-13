@@ -24,6 +24,7 @@ robot_status = {
 
 Findee = None
 
+#region 로봇 연결 이벤트
 # 연결 성공: 로봇 등록 요청
 @sio.event
 def connect():
@@ -31,6 +32,9 @@ def connect():
 
     # 서버에 로봇 등록
     print("📤 서버에 로봇 등록 요청 전송...")
+    print(f"🔍 로봇 정보 - ID: {ROBOT_ID}, Name: {ROBOT_NAME}, Version: {ROBOT_VERSION}")
+    print(f"🔍 세션 ID: {sio.sid}")
+
     sio.emit('robot_connected', { # 로봇 > 서버
         'robot_id': ROBOT_ID,
         'robot_name': ROBOT_NAME,
@@ -56,6 +60,18 @@ def disconnect():
                 pass
     threading.Thread(target=reconnect_loop, daemon=True).start()
 
+def heartbeat_thread():
+    while True:
+        if sio.connected:
+            try:
+                sio.emit('robot_heartbeat', {'robot_id': ROBOT_ID})
+                print("하트비트 전송")
+            except Exception as e:
+                print(f"하트비트 전송 실패: {e}")
+        time.sleep(10)
+#endregion
+
+#region 로봇 코드 실행
 def exec_code(code, session_id):
     global stop_flag, running_thread
     stop_flag = False
@@ -70,10 +86,7 @@ def exec_code(code, session_id):
     def realtime_print(*args, **kwargs):
         output = ' '.join(str(arg) for arg in args)
         if output:
-            sio.emit('robot_stdout', {
-                'session_id': session_id,
-                'output': output
-            })
+            sio.emit('robot_stdout', {'session_id': session_id, 'output': output})
 
     try:
         @check_stop_flag
@@ -90,7 +103,6 @@ def exec_code(code, session_id):
                     if debug_on: print("DEBUG: JPEG 인코딩 실패")
                     return
 
-                # sio.emit() 사용 - 바이너리 첨부 전송
                 sio.emit('robot_emit_image', {
                     'session_id': session_id,
                     'image_data': buffer.tobytes(),
@@ -142,20 +154,15 @@ def execute_code(data):
     global running_thread
     try:
         code = data.get('code', '')
-
-        # 현재 세션 ID 가져오기
         session_id = data.get('session_id', '')
 
-        # 별도 스레드에서 코드 실행
         thread = threading.Thread(
             target=exec_code,
             args=(code, session_id),
             daemon=True
         )
 
-        # 스레드를 추적 딕셔너리에 저장
         running_thread = thread
-
         thread.start()
 
     except Exception as e:
@@ -211,35 +218,24 @@ def stop_execution(data):
             'session_id': session_id,
             'output': f'코드 중지 중 오류가 발생했습니다: {str(e)}'
         })
+#endregion
 
-def heartbeat_thread():
-    while True:
-        if sio.connected:
-            try:
-                sio.emit('robot_heartbeat', {'robot_id': ROBOT_ID})
-                print("하트비트 전송")
-            except Exception as e:
-                print(f"하트비트 전송 실패: {e}")
-        time.sleep(10)
-
+#region 로봇 업데이트
 @sio.event
 def client_update(data):
     import subprocess
-    import os
+    import re
     from pathlib import Path
 
     try:
         script_dir = Path(__file__).parent.absolute()
-        print(f"📥 Git 업데이트 시작... (작업 디렉토리: {script_dir})")
-        print(f"현재 버전: {ROBOT_VERSION}")
+        print(f"📥 Git 업데이트 시작... 현재 버전: {ROBOT_VERSION}")
 
-        # 1. 현재 ROBOT_ID와 ROBOT_NAME 저장
         print("💾 현재 로봇 설정 저장 중...")
         current_robot_id = ROBOT_ID
         current_robot_name = ROBOT_NAME
         print(f"📋 저장된 설정 - ID: {current_robot_id}, Name: {current_robot_name}")
 
-        # 2. 로컬 변경사항을 stash로 저장
         print("💾 로컬 변경사항을 stash로 저장 중...")
         stash_result = subprocess.run(['git', 'stash', 'push', '-m', '"Auto stash before update"'],
                                     capture_output=True, text=True, cwd=str(script_dir))
@@ -249,8 +245,7 @@ def client_update(data):
         else:
             print(f"⚠️ Stash 저장 중 경고: {stash_result.stderr}")
 
-        # 3. 강제로 pull 실행
-        print("🔄 강제 Git pull 실행 중...")
+        print("🔄 Git pull 실행 중...")
         result = subprocess.run(['git', 'pull', 'origin', 'main'],
                               capture_output=True, text=True, cwd=str(script_dir))
 
@@ -266,22 +261,15 @@ def client_update(data):
             'output': f"✅ Git 업데이트 성공: {result.stdout}"
         })
 
-        # 4. 저장된 로봇 설정 복원
         print("🔄 저장된 로봇 설정 복원 중...")
         config_file_path = script_dir / 'robot_config.py'
 
-        # robot_config.py 파일 읽기
         with open(config_file_path, 'r', encoding='utf-8') as f:
             config_content = f.read()
 
-        # ROBOT_ID와 ROBOT_NAME 복원
         if current_robot_id is not None:
-            # 기존 값이 있든 없든 현재 값으로 교체
-            import re
             config_content = re.sub(r'ROBOT_ID\s*=\s*[^\n]+', f'ROBOT_ID = "{current_robot_id}"', config_content)
         if current_robot_name is not None:
-            # 기존 값이 있든 없든 현재 값으로 교체
-            import re
             config_content = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = "{current_robot_name}"', config_content)
 
         with open(config_file_path, 'w', encoding='utf-8') as f:
@@ -289,7 +277,6 @@ def client_update(data):
 
         print(f"✅ 로봇 설정 복원 완료 - ID: {current_robot_id}, Name: {current_robot_name}")
 
-        # 5. 서비스 재시작
         print("🔄 서비스 재시작 중...")
         restart_result = subprocess.run(['sudo', 'systemctl', 'restart', 'robot_client.service'],
                                       capture_output=True, text=True, timeout=10)
@@ -315,6 +302,7 @@ def client_update(data):
             'session_id': 'system',
             'output': f"❌ 업데이트 중 오류: {str(e)}"
         })
+#endregion
 
 if __name__ == "__main__":
     try:
