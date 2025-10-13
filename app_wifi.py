@@ -4,7 +4,7 @@
 # 이후 로봇 클라이언트가 이 파일을 읽어서 와이파이 정보와 로봇 이름을 사용
 # 클라이언트 모드로 변경
 
-from flask import Flask, render_template, request, jsonify, redirect
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 import subprocess
 import re
 import uuid
@@ -39,16 +39,15 @@ def update_robot_config(robot_name, robot_id):
         f.writelines(updated_lines)
 
 @app.route("/generate_204")
-def captive_probe_redirect():
-    return redirect(SERVER_URL, code=302)
-
-@app.route("/redirect")
-def msft_redirect():
-    return redirect("/", code=302)
-
+@app.route("/gen_204")
 @app.route("/hotspot-detect.html")
-def apple_redirect():
-    return redirect("/", code=302)
+@app.route("/library/test/success.html")
+@app.route("/success.txt")
+@app.route("/connecttest.txt")
+@app.route("/redirect")
+@app.route("/ncsi.txt")
+def captive_probe_redirect():
+    return redirect(url_for("index"), code=302)
 
 @app.route('/connect', methods=['POST'])
 def setup_robot():
