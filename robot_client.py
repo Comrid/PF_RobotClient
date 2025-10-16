@@ -319,12 +319,8 @@ def client_reset(data):
     with open(config_path, 'w') as f:
         f.writelines(updated_lines)
 
-    # "Pathfinder-Client" 프로필 삭제.
-    subprocess.run(["sudo", "nmcli", "connection", "delete", "Pathfinder-Client"], capture_output=True)
-
-    print("🔄 서비스 재시작 중...")
-    restart_result = subprocess.run(['sudo', 'systemctl', 'restart', 'robot_client.service'],
-                                    capture_output=True, text=True, timeout=10)
+    # 모드 전환 스크립트 실행(백그라운드)
+    subprocess.Popen(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
 
 #endregion
 
