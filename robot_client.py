@@ -1,6 +1,7 @@
 #TODO 로봇 커스텀 함수 관리
 
 from __future__ import annotations
+from asyncio import subprocess
 import threading
 from traceback import format_exc
 import socketio
@@ -209,7 +210,7 @@ def stop_execution(data):
         })
 #endregion
 
-#region 로봇 업데이트
+#region 로봇 업데이트/초기화
 @sio.event
 def client_update(data):
     import subprocess
@@ -291,6 +292,39 @@ def client_update(data):
             'session_id': 'system',
             'output': f"❌ 업데이트 중 오류: {str(e)}"
         })
+
+@sio.event
+def client_reset():
+    import os
+
+    # /etc/pf_env 파일 수정
+    subprocess.run("echo 'MODE=AP' | sudo tee /etc/pf_env", shell=True, check=True)
+
+    # robot_config.py에 로봇 이름, 로봇 아이디를 None으로 초기화.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(current_dir, "robot_config.py")
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    updated_lines = []
+    for line in lines:
+        if line.startswith('ROBOT_ID ='):
+            updated_lines.append('ROBOT_ID = None\n')
+        elif line.startswith('ROBOT_NAME ='):
+            updated_lines.append('ROBOT_NAME = None\n')
+        else:
+            updated_lines.append(line)
+
+    with open(config_path, 'w') as f:
+        f.writelines(updated_lines)
+
+    # "Pathfinder-Client" 프로필 삭제.
+    subprocess.run(["sudo", "nmcli", "connection", "delete", "Pathfinder-Client"], capture_output=True)
+
+    # 모드 전환 스크립트 실행(백그라운드)
+    subprocess.Popen(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
+
 #endregion
 
 if __name__ == "__main__":
