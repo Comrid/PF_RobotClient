@@ -294,7 +294,7 @@ def client_update(data):
         })
 
 @sio.event
-def client_reset():
+def client_reset(data):
     import os
 
     # /etc/pf_env 파일 수정
