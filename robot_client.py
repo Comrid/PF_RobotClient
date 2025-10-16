@@ -1,7 +1,7 @@
 #TODO 로봇 커스텀 함수 관리
 
 from __future__ import annotations
-from asyncio import subprocess
+import subprocess
 import threading
 from traceback import format_exc
 import socketio
