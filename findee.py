@@ -154,12 +154,12 @@ class Findee:
     # Rotation
     @debug_decorator
     def turn_left(self, speed : float = default_speed, duration : float = 0.0):
-        self.control_motors(speed, -speed)
+        self.control_motors(-speed, speed)
         self.__duration_check(duration)
 
     @debug_decorator
     def turn_right(self, speed : float = default_speed, duration : float = 0.0):
-        self.control_motors(-speed, speed)
+        self.control_motors(speed, -speed)
         self.__duration_check(duration)
 
     # Curvilinear Rotation
@@ -167,14 +167,14 @@ class Findee:
     def curve_left(self, speed : float = default_speed, angle : int = 60, duration : float = 0.0):
         angle = self.constrain(angle, 0, 60)
         ratio = 1.0 - (angle / 60.0) * 0.5
-        self.control_motors(speed, speed * ratio)
+        self.control_motors(speed * ratio, speed)
         self.__duration_check(duration)
 
     @debug_decorator
     def curve_right(self, speed : float = default_speed, angle : int = 60, duration : float = 0.0):
         angle = self.constrain(angle, 0, 60)
         ratio = 1.0 - (angle / 60.0) * 0.5
-        self.control_motors(speed * ratio, speed)
+        self.control_motors(speed, speed * ratio)
         self.__duration_check(duration)
 
     def __duration_check(self, duration: float):
