@@ -201,7 +201,7 @@ def client_reset(data):
             f.write(contents)
 
     # 모드 전환 스크립트 실행(백그라운드)
-    subprocess.Popen(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
+    subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
 #endregion
 
 if __name__ == "__main__":

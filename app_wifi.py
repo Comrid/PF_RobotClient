@@ -22,7 +22,6 @@ def index():
 
 @app.route('/robot-name')
 def get_robot_name():
-    """로봇의 사전 정의된 이름을 반환"""
     try:
         return jsonify({
             "success": True,
