@@ -26,15 +26,17 @@
     <div class="container">
         <h1 class="title">로봇 설정</h1>
         <p class="description">
-            로봇을 웹 에디터와 연동하기 위해<br>로봇 이름과 와이파이 정보를 입력하세요.
+            로봇을 웹 에디터와 연동하기 위해<br>와이파이 정보를 입력하세요.
         </p>
+        
+        <div class="robot-info" style="background: rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 20px; margin-bottom: 30px; border: 1px solid rgba(255, 255, 255, 0.2);">
+            <h3 style="margin-bottom: 10px; color: #4ade80;">🤖 이 로봇의 이름</h3>
+            <div style="font-size: 1.2rem; font-weight: 600; color: #fbbf24; margin-bottom: 10px;" id="robotNameDisplay">로딩 중...</div>
+            <p style="font-size: 0.9rem; opacity: 0.8;">이 이름으로 웹 에디터에서 로봇을 찾을 수 있습니다.</p>
+        </div>
 
         <div class="setup-form">
-            <h3>로봇 및 네트워크 설정</h3>
-            <div class="form-group">
-                <label class="form-label" for="robot_name">로봇 이름</label>
-                <input type="text" class="form-input" id="robot_name" name="robot_name" placeholder="연동에 사용할 로봇 이름" required>
-            </div>
+            <h3>네트워크 설정</h3>
             <div class="form-group">
                 <label class="form-label" for="ssid">WiFi 이름 (SSID)</label>
                 <input type="text" class="form-input" id="ssid" name="ssid" placeholder="와이파이 이름" required>
@@ -50,11 +52,31 @@
             <div class="spinner"></div>
             <div id="loadingText"></div>
         </div>
-        
+
         <div class="status" id="status"></div>
     </div>
 
     <script>
+        // 페이지 로드 시 로봇 이름 표시
+        document.addEventListener('DOMContentLoaded', function() {
+            loadRobotName();
+        });
+
+        function loadRobotName() {
+            fetch('/robot-name')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('robotNameDisplay').textContent = data.robot_name;
+                    } else {
+                        document.getElementById('robotNameDisplay').textContent = '로봇 이름을 불러올 수 없습니다';
+                    }
+                })
+                .catch(error => {
+                    console.error('로봇 이름 로드 오류:', error);
+                    document.getElementById('robotNameDisplay').textContent = '로봇 이름을 불러올 수 없습니다';
+                });
+        }
 
         function showLoading(message) {
             document.getElementById('loadingText').textContent = message;
@@ -73,12 +95,11 @@
 
 
         function setupRobot() {
-            const robotName = document.getElementById('robot_name').value.trim();
             const ssid = document.getElementById('ssid').value.trim();
             const password = document.getElementById('password').value.trim();
 
-            if (!robotName || !ssid || !password) {
-                showStatus('로봇 이름, WiFi 이름, 비밀번호를 모두 입력해주세요.', true);
+            if (!ssid || !password) {
+                showStatus('WiFi 이름, 비밀번호를 모두 입력해주세요.', true);
                 return;
             }
 
@@ -91,25 +112,12 @@
                 showStatus('WiFi 비밀번호는 63자 이하여야 합니다.', true);
                 return;
             }
-            if (!/^[a-zA-Z0-9]+$/.test(robotName)) {
-                showStatus('로봇 이름은 영문자와 숫자만 사용할 수 있습니다.', true);
-                return;
-            }
-            if (robotName.length < 3) {
-                showStatus('로봇 이름은 3자 이상이어야 합니다.', true);
-                return;
-            }
-            if (robotName.length > 10) {
-                showStatus('로봇 이름은 10자 이하여야 합니다.', true);
-                return;
-            }
 
             showLoading('로봇을 설정하고 서버에 등록합니다...');
             fetch('/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    robot_name: robotName,
                     ssid: ssid,
                     password: password
                 })

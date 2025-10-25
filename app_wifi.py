@@ -11,6 +11,7 @@ import uuid
 import os
 import platform
 
+from robot_config import ROBOT_NAME_DEFAULT
 SERVER_URL = "https://pathfinder-kit.duckdns.org"
 
 app = Flask(__name__)
@@ -19,7 +20,21 @@ app = Flask(__name__)
 def index():
     return render_template('index.html')
 
-def update_robot_config(robot_name, robot_id):
+@app.route('/robot-name')
+def get_robot_name():
+    """로봇의 사전 정의된 이름을 반환"""
+    try:
+        return jsonify({
+            "success": True,
+            "robot_name": ROBOT_NAME_DEFAULT
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+def update_robot_config(robot_id):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(current_dir, "robot_config.py")
 
@@ -31,7 +46,7 @@ def update_robot_config(robot_name, robot_id):
         if line.startswith('ROBOT_ID ='):
             updated_lines.append(f'ROBOT_ID = "{robot_id}"\n')
         elif line.startswith('ROBOT_NAME ='):
-            updated_lines.append(f'ROBOT_NAME = "{robot_name}"\n')
+            updated_lines.append(f'ROBOT_NAME = "{ROBOT_NAME_DEFAULT}"\n')
         else:
             updated_lines.append(line)
 
@@ -53,17 +68,14 @@ def captive_probe_redirect():
 def setup_robot():
     try:
         data = request.get_json()
-        robot_name = data.get('robot_name')
         ssid = data.get('ssid')
         password = data.get('password')
 
         # 검증
-        if not all([robot_name, ssid, password]):
-            return jsonify({"success": False, "error": "로봇 이름, SSID, 비밀번호를 모두 입력해주세요."}), 400
+        if not all([ssid, password]):
+            return jsonify({"success": False, "error": "SSID, 비밀번호를 모두 입력해주세요."}), 400
         if not (8 <= len(password) <= 63):
             return jsonify({"success": False, "error": "WiFi 비밀번호는 8자 이상, 63자 이하여야 합니다."}), 400
-        if not (3 <= len(robot_name) <= 10) or not re.match(r'^[a-zA-Z0-9]+$', robot_name):
-            return jsonify({"success": False, "error": "로봇 이름은 3~10자의 영문자와 숫자만 사용할 수 있습니다."}), 400
 
 
         if platform.system() == "Linux":
@@ -94,7 +106,7 @@ def setup_robot():
 
                 # 로봇 설정 업데이트
                 robot_id = f"robot_{uuid.uuid4().hex[:8]}"
-                update_robot_config(robot_name, robot_id)
+                update_robot_config(robot_id)
 
                 # /etc/pf_env 파일 수정
                 subprocess.run("echo 'MODE=CLIENT' | sudo tee /etc/pf_env", shell=True, check=True)
@@ -105,7 +117,7 @@ def setup_robot():
                 return jsonify({
                     "success": True,
                     "message": "WiFi 정보 저장 성공! 클라이언트 모드로 전환합니다.",
-                    "robot_name": robot_name,
+                    "robot_name": ROBOT_NAME_DEFAULT,
                     "robot_id": robot_id
                 })
 
@@ -118,7 +130,7 @@ def setup_robot():
             return jsonify({
                 "success": True,
                 "message": "시뮬레이션 성공",
-                "robot_name": robot_name,
+                "robot_name": ROBOT_NAME_DEFAULT,
                 "robot_id": robot_id
             })
 
