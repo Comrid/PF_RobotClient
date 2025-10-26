@@ -159,23 +159,11 @@ def client_update(data):
     import subprocess, re
     try:
         ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
-
-        # 현재 로봇 설정 저장
-        RobotID = ROBOT_ID
-        RobotName = ROBOT_NAME
-
-        # 강제 Git pull
-        force_git_pull(ScriptDir)
-
+        RobotID, RobotName = ROBOT_ID, ROBOT_NAME # 현재 로봇 설정 저장
+        force_git_pull(ScriptDir) # 강제 Git pull
         # 로봇 설정 복원
-        ConfigDir = ScriptDir / 'robot_config.py'
-        with open(ConfigDir, 'r', encoding='utf-8') as f:
-            contents = f.read()
-        if RobotID is not None: contents = re.sub(r'ROBOT_ID\s*=\s*[^\n]+', f'ROBOT_ID = "{RobotID}"', contents)
-        if RobotName is not None: contents = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = "{RobotName}"', contents)
-        with open(ConfigDir, 'w', encoding='utf-8') as f:
-            f.write(contents)
-
+        subprocess.run(f"sed -i 's/ROBOT_ID = .*/ROBOT_ID = \"{RobotID}\"/' {ScriptDir}/robot_config.py", shell=True, check=True)
+        subprocess.run(f"sed -i 's/ROBOT_NAME = .*/ROBOT_NAME = \"{RobotName}\"/' {ScriptDir}/robot_config.py", shell=True, check=True)
         # 서비스 재시작
         subprocess.Popen(['sudo', 'systemctl', 'restart', 'robot_client.service'], capture_output=True, text=True, timeout=10)
     except subprocess.TimeoutExpired:
@@ -185,13 +173,10 @@ def client_update(data):
 
 @sio.event
 def client_reset(data):
-    # /etc/pf_env 파일 수정
-    subprocess.run("echo 'MODE=AP' | sudo tee /etc/pf_env", shell=True, check=True)
+    subprocess.run("echo 'MODE=AP' | sudo tee /etc/pf_env", shell=True, check=True) # /etc/pf_env 파일 수정
     ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
     force_git_pull(ScriptDir)
-    # 모드 전환 스크립트 실행(백그라운드)
-    #subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
-    subprocess.Popen(["sudo", "reboot"])
+    subprocess.Popen(["sudo", "reboot"]) # 재부팅
 #endregion
 
 if __name__ == "__main__":
