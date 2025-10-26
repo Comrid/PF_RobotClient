@@ -12,7 +12,6 @@ import os
 import platform
 import time
 
-from robot_config import ROBOT_NAME_DEFAULT
 SERVER_URL = "https://pathfinder-kit.duckdns.org"
 DISPLAY_MESSAGE = None # 정상 메시지 또는 오류 메시지
 
@@ -22,41 +21,21 @@ app = Flask(__name__)
 def index():
     return render_template('index.html')
 
+def get_default_robot_name():
+    # /etc/pf_default_robot_name에서 로봇 이름 읽기
+    result = subprocess.run(["cat", "/etc/pf_default_robot_name"], capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
 @app.route('/robot-name')
 def get_robot_name():
-    try:
-        return jsonify({
-            "success": True,
-            "robot_name": ROBOT_NAME_DEFAULT
-        })
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+    return jsonify({"success": True, "robot_name": get_default_robot_name()})
+
 
 @app.route('/display_message')
 def get_display_message():
+    global DISPLAY_MESSAGE
     return jsonify({"success": True, "message": DISPLAY_MESSAGE})
 
-def update_robot_config(robot_id):
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(current_dir, "robot_config.py")
-
-    with open(config_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-
-    updated_lines = []
-    for line in lines:
-        if line.startswith('ROBOT_ID ='):
-            updated_lines.append(f'ROBOT_ID = "{robot_id}"\n')
-        elif line.startswith('ROBOT_NAME ='):
-            updated_lines.append(f'ROBOT_NAME = "{ROBOT_NAME_DEFAULT}"\n')
-        else:
-            updated_lines.append(line)
-
-    with open(config_path, 'w') as f:
-        f.writelines(updated_lines)
 
 @app.route("/generate_204")
 @app.route("/gen_204")
@@ -69,13 +48,10 @@ def update_robot_config(robot_id):
 def captive_probe_redirect():
     return redirect(url_for("index"), code=302)
 
+
 def restore_ap_mode():
-    """AP 모드로 복귀"""
-    try:
-        subprocess.run(["sudo", "nmcli", "con", "up", "Pathfinder-AP"],
-                      capture_output=True, timeout=10)
-    except:
-        pass
+    subprocess.run(["sudo", "nmcli", "con", "up", "Pathfinder-AP"], capture_output=True, timeout=10)
+
 
 @app.route('/connect', methods=['POST'])
 def setup_robot():
@@ -117,22 +93,23 @@ def setup_robot():
 
             # 로봇 설정 업데이트
             robot_id = f"robot_{uuid.uuid4().hex[:8]}"
-            update_robot_config(robot_id)
+            subprocess.run(f"sed -i 's/ROBOT_ID = .*/ROBOT_ID = \"{robot_id}\"/' /home/pi/PF_RobotClient/robot_config.py", shell=True, check=True)
+            subprocess.run(f"sed -i 's/ROBOT_NAME = .*/ROBOT_NAME = \"{get_default_robot_name()}\"/' /home/pi/PF_RobotClient/robot_config.py", shell=True, check=True)
 
             # /etc/pf_env 파일 수정
             subprocess.run("echo 'MODE=CLIENT' | sudo tee /etc/pf_env", shell=True, check=True)
 
-            # 모드 전환 스크립트 실행(백그라운드)
-            subprocess.Popen(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
-
             return jsonify({
                 "success": True,
                 "message": "WiFi 정보 저장 성공! 클라이언트 모드로 전환합니다.",
-                "robot_name": ROBOT_NAME_DEFAULT,
+                "robot_name": get_default_robot_name(),
                 "robot_id": robot_id
             })
         except Exception as e:
             return jsonify({"success": False, "error": str(e) + "(WIFI SETUP ERROR)"}), 500
+        finally:
+            # 모드 전환 스크립트 실행(백그라운드)
+            subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
     except Exception as e:
         return jsonify({"success": False, "error": str(e) + "(API ERROR)"}), 500
 

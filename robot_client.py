@@ -149,6 +149,11 @@ def stop_execution(data):
 #endregion
 
 #region 로봇 업데이트/초기화
+def force_git_pull(ScriptDir):
+    # 로컬 변경사항을 stash로 저장 및 Git pull 실행
+    subprocess.run(['git', 'stash', 'push', '-m', '"Temp"'], capture_output=True, text=True, cwd=str(ScriptDir))
+    subprocess.run(['git', 'pull', 'origin', 'main'], capture_output=True, text=True, cwd=str(ScriptDir))
+
 @sio.event
 def client_update(data):
     import subprocess, re
@@ -158,20 +163,16 @@ def client_update(data):
         # 현재 로봇 설정 저장
         RobotID = ROBOT_ID
         RobotName = ROBOT_NAME
-        # 로컬 변경사항을 stash로 저장
-        subprocess.run(['git', 'stash', 'push', '-m', '"Auto stash"'], capture_output=True, text=True, cwd=str(ScriptDir))
 
-        # Git pull 실행
-        subprocess.run(['git', 'pull', 'origin', 'main'], capture_output=True, text=True, cwd=str(ScriptDir))
+        # 강제 Git pull
+        force_git_pull(ScriptDir)
 
         # 로봇 설정 복원
         ConfigDir = ScriptDir / 'robot_config.py'
         with open(ConfigDir, 'r', encoding='utf-8') as f:
             contents = f.read()
-        if RobotID is not None:
-            contents = re.sub(r'ROBOT_ID\s*=\s*[^\n]+', f'ROBOT_ID = "{RobotID}"', contents)
-        if RobotName is not None:
-            contents = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = "{RobotName}"', contents)
+        if RobotID is not None: contents = re.sub(r'ROBOT_ID\s*=\s*[^\n]+', f'ROBOT_ID = "{RobotID}"', contents)
+        if RobotName is not None: contents = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = "{RobotName}"', contents)
         with open(ConfigDir, 'w', encoding='utf-8') as f:
             f.write(contents)
 
@@ -184,20 +185,10 @@ def client_update(data):
 
 @sio.event
 def client_reset(data):
-    import re
-
     # /etc/pf_env 파일 수정
     subprocess.run("echo 'MODE=AP' | sudo tee /etc/pf_env", shell=True, check=True)
-
-    # robot_config.py에 로봇 이름, 로봇 아이디를 None으로 초기화
-    ConfigDir = Path(__file__).parent.absolute() / 'robot_config.py'
-    with open(ConfigDir, 'r', encoding='utf-8') as f:
-        contents = f.read()
-        contents = re.sub(r'ROBOT_ID\s*=\s*[^\n]+', f'ROBOT_ID = None', contents)
-        contents = re.sub(r'ROBOT_NAME\s*=\s*[^\n]+', f'ROBOT_NAME = None', contents)
-        with open(ConfigDir, 'w', encoding='utf-8') as f:
-            f.write(contents)
-
+    ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
+    force_git_pull(ScriptDir)
     # 모드 전환 스크립트 실행(백그라운드)
     subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
 #endregion
