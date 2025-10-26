@@ -177,7 +177,7 @@ def client_update(data):
             f.write(contents)
 
         # 서비스 재시작
-        subprocess.run(['sudo', 'systemctl', 'restart', 'robot_client.service'], capture_output=True, text=True, timeout=10)
+        subprocess.Popen(['sudo', 'systemctl', 'restart', 'robot_client.service'], capture_output=True, text=True, timeout=10)
     except subprocess.TimeoutExpired:
         pass
     except Exception as e:
@@ -190,7 +190,8 @@ def client_reset(data):
     ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
     force_git_pull(ScriptDir)
     # 모드 전환 스크립트 실행(백그라운드)
-    subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
+    #subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
+    subprocess.Popen(["sudo", "reboot"])
 #endregion
 
 if __name__ == "__main__":

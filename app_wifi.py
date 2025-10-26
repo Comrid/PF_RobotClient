@@ -67,49 +67,53 @@ def setup_robot():
         if not (8 <= len(password) <= 63):
             return jsonify({"success": False, "error": "WiFi 비밀번호는 8자 이상, 63자 이하여야 합니다."}), 400
 
-        try:
-            # 동일한 이름의 프로필이 있다면 삭제
-            PROFILE_NAME = "Pathfinder-Client"
-            subprocess.run(["sudo", "nmcli", "connection", "delete", PROFILE_NAME], capture_output=True)
+        if platform.system() == "Linux":
+            try:
+                # 동일한 이름의 프로필이 있다면 삭제
+                PROFILE_NAME = "Pathfinder-Client"
+                subprocess.run(["sudo", "nmcli", "connection", "delete", PROFILE_NAME], capture_output=True)
 
-            # 새로운 프로필 추가
-            add_command = [
-                "sudo", "nmcli", "connection", "add",
-                "type", "wifi",
-                "con-name", PROFILE_NAME,
-                "ifname", "wlan0",
-                "ssid", ssid
-            ]
-            subprocess.run(add_command, check=True, text=True, capture_output=True, timeout=15)
+                # 새로운 프로필 추가
+                add_command = [
+                    "sudo", "nmcli", "connection", "add",
+                    "type", "wifi",
+                    "con-name", PROFILE_NAME,
+                    "ifname", "wlan0",
+                    "ssid", ssid
+                ]
+                subprocess.run(add_command, check=True, text=True, capture_output=True, timeout=15)
 
-            # 생성된 프로필에 비밀번호와 자동 연결 설정
-            modify_command = [
-                "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
-                "wifi-sec.key-mgmt", "wpa-psk",
-                "wifi-sec.psk", password,
-                "connection.autoconnect", "yes"
-            ]
-            subprocess.run(modify_command, check=True, text=True, capture_output=True, timeout=15)
+                # 생성된 프로필에 비밀번호와 자동 연결 설정
+                modify_command = [
+                    "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
+                    "wifi-sec.key-mgmt", "wpa-psk",
+                    "wifi-sec.psk", password,
+                    "connection.autoconnect", "yes"
+                ]
+                subprocess.run(modify_command, check=True, text=True, capture_output=True, timeout=15)
 
-            # 로봇 설정 업데이트
-            robot_id = f"robot_{uuid.uuid4().hex[:8]}"
-            subprocess.run(f"sed -i 's/ROBOT_ID = .*/ROBOT_ID = \"{robot_id}\"/' /home/pi/PF_RobotClient/robot_config.py", shell=True, check=True)
-            subprocess.run(f"sed -i 's/ROBOT_NAME = .*/ROBOT_NAME = \"{get_default_robot_name()}\"/' /home/pi/PF_RobotClient/robot_config.py", shell=True, check=True)
+                # 로봇 설정 업데이트
+                robot_id = f"robot_{uuid.uuid4().hex[:8]}"
+                subprocess.run(f"sed -i 's/ROBOT_ID = .*/ROBOT_ID = \"{robot_id}\"/' /home/kucira/PF_RobotClient/robot_config.py", shell=True, check=True)
+                subprocess.run(f"sed -i 's/ROBOT_NAME = .*/ROBOT_NAME = \"{get_default_robot_name()}\"/' /home/kucira/PF_RobotClient/robot_config.py", shell=True, check=True)
 
-            # /etc/pf_env 파일 수정
-            subprocess.run("echo 'MODE=CLIENT' | sudo tee /etc/pf_env", shell=True, check=True)
+                # /etc/pf_env 파일 수정
+                subprocess.run("echo 'MODE=CLIENT' | sudo tee /etc/pf_env", shell=True, check=True)
 
-            return jsonify({
-                "success": True,
-                "message": "WiFi 정보 저장 성공! 클라이언트 모드로 전환합니다.",
-                "robot_name": get_default_robot_name(),
-                "robot_id": robot_id
-            })
-        except Exception as e:
-            return jsonify({"success": False, "error": str(e) + "(WIFI SETUP ERROR)"}), 500
-        finally:
-            # 모드 전환 스크립트 실행(백그라운드)
-            subprocess.run(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
+                return jsonify({
+                    "success": True,
+                    "message": "WiFi 정보 저장 성공! 클라이언트 모드로 전환합니다.",
+                    "robot_name": get_default_robot_name(),
+                    "robot_id": robot_id
+                })
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e) + "(WIFI SETUP ERROR)"}), 500
+            finally:
+                # 모드 전환 스크립트 실행(백그라운드)
+                time.sleep(1)
+                subprocess.Popen(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
+        else:
+            return jsonify({"success": True, "message": "Linux 환경이 아닙니다."}), 500
     except Exception as e:
         return jsonify({"success": False, "error": str(e) + "(API ERROR)"}), 500
 
