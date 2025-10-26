@@ -157,6 +157,14 @@
                 return;
             }
 
+            const confirmed = confirm(
+                `WiFi 정보를 확인해주세요:\n\n` +
+                `WiFi 이름: ${ssid}\n` +
+                `비밀번호: ${password}\n\n` +
+                `입력하신 정보가 확실한가요?`
+            );
+            if (!confirmed) {return;}
+
             // 로봇 설정 진행
             showLoading('로봇 설정 중...');
             fetch('/connect', {
