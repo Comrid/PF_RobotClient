@@ -1,5 +1,5 @@
 import platform
-ROBOT_VERSION = "1.1.17"
+ROBOT_VERSION = "1.2.0"
 HARDWARE_ENABLED = platform.system() == "Linux"
 SERVER_URL = "https://pathfinder-kit.duckdns.org"
 ROBOT_ID = None

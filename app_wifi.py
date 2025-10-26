@@ -54,7 +54,7 @@ def restore_ap_mode():
 
 
 @app.route('/connect', methods=['POST'])
-def setup_robot():
+def connect():
     global DISPLAY_MESSAGE
     try:
         data = request.get_json()
@@ -113,7 +113,9 @@ def setup_robot():
                 time.sleep(1)
                 subprocess.Popen(["sudo", "/usr/local/bin/pf-netmode-bookworm.sh"])
         else:
-            return jsonify({"success": True, "message": "Linux 환경이 아닙니다."}), 500
+            time.sleep(2)
+            return jsonify({"success": True, "robot_name": "Testbot", "message": "Linux 환경이 아닙니다."})
+
     except Exception as e:
         return jsonify({"success": False, "error": str(e) + "(API ERROR)"}), 500
 
