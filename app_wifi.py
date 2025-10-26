@@ -10,9 +10,11 @@ import re
 import uuid
 import os
 import platform
+import time
 
 from robot_config import ROBOT_NAME_DEFAULT
 SERVER_URL = "https://pathfinder-kit.duckdns.org"
+DISPLAY_MESSAGE = None # 정상 메시지 또는 오류 메시지
 
 app = Flask(__name__)
 
@@ -32,6 +34,10 @@ def get_robot_name():
             "success": False,
             "error": str(e)
         }), 500
+
+@app.route('/display_message')
+def get_display_message():
+    return jsonify({"success": True, "message": DISPLAY_MESSAGE})
 
 def update_robot_config(robot_id):
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,22 +69,82 @@ def update_robot_config(robot_id):
 def captive_probe_redirect():
     return redirect(url_for("index"), code=302)
 
+def restore_ap_mode():
+    """AP 모드로 복귀"""
+    try:
+        subprocess.run(["sudo", "nmcli", "con", "up", "Pathfinder-AP"],
+                      capture_output=True, timeout=10)
+    except:
+        pass
+
 @app.route('/connect', methods=['POST'])
 def setup_robot():
+    global DISPLAY_MESSAGE
     try:
         data = request.get_json()
         ssid = data.get('ssid')
         password = data.get('password')
 
-        # 검증
+        # 기본 검증
         if not all([ssid, password]):
             return jsonify({"success": False, "error": "SSID, 비밀번호를 모두 입력해주세요."}), 400
         if not (8 <= len(password) <= 63):
             return jsonify({"success": False, "error": "WiFi 비밀번호는 8자 이상, 63자 이하여야 합니다."}), 400
 
-
         if platform.system() == "Linux":
             try:
+                # 1. Pathfinder-AP 연결 해제 및 대기
+                subprocess.run(["sudo", "nmcli", "con", "down", "Pathfinder-AP"], capture_output=True, timeout=10)
+                time.sleep(1)
+
+                # 2. WiFi 스캔 및 SSID 존재 확인
+                subprocess.run(["sudo", "nmcli", "dev", "wifi", "rescan"], check=True, timeout=10)
+                scan_result = subprocess.run(["sudo", "nmcli", "dev", "wifi", "list"], capture_output=True, text=True, timeout=15)
+
+                # 3. SSID 잘못 입력 감지
+                if ssid not in scan_result.stdout:
+                    restore_ap_mode()
+                    DISPLAY_MESSAGE = f"'{ssid}' WiFi를 찾을 수 없습니다. SSID를 확인해주세요."
+                    return jsonify({"success": False, "message": DISPLAY_MESSAGE}), 400
+
+                # 4. 임시 프로필로 연결 테스트
+                test_profile = "test-wifi"
+
+                try:
+                    # 임시 프로필 생성
+                    subprocess.run([
+                        "sudo", "nmcli", "con", "add",
+                        "type", "wifi", "con-name", test_profile,
+                        "ifname", "wlan0", "ssid", ssid
+                    ], check=True, timeout=10)
+
+                    subprocess.run([
+                        "sudo", "nmcli", "con", "modify", test_profile,
+                        "wifi-sec.key-mgmt", "wpa-psk",
+                        "wifi-sec.psk", password
+                    ], check=True, timeout=10)
+
+                    # 연결 시도
+                    connect_result = subprocess.run([
+                        "sudo", "nmcli", "con", "up", test_profile, "--verbose"
+                    ], capture_output=True, text=True, timeout=30)
+
+                    # 5. 오류 확인
+                    if connect_result.returncode != 0:
+                        error_msg = connect_result.stderr.lower()
+                        if "authentication" in error_msg or "802-11" in error_msg or "supplicant" in error_msg:
+                            DISPLAY_MESSAGE = "WiFi 비밀번호가 올바르지 않습니다"
+                        elif "timeout" in error_msg or "timed out" in error_msg:
+                            DISPLAY_MESSAGE = "연결 시간 초과 - 비밀번호가 틀렸을 가능성이 높습니다"
+                        else:
+                            DISPLAY_MESSAGE = f"연결 실패: {connect_result.stderr}"
+                        restore_ap_mode()
+                        return jsonify({"success": False, "message": DISPLAY_MESSAGE}), 400
+                finally:
+                    # 임시 프로필 삭제
+                    subprocess.run(["sudo", "nmcli", "con", "delete", test_profile], capture_output=True, timeout=10)
+
+                # 6. 검증 통과 - Pathfinder-Client 프로필 생성
                 PROFILE_NAME = "Pathfinder-Client"
 
                 # 동일한 이름의 프로필이 있다면 삭제

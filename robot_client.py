@@ -1,5 +1,3 @@
-#TODO 로봇 커스텀 함수 관리
-
 from __future__ import annotations
 import subprocess
 import threading
@@ -207,7 +205,6 @@ def client_reset(data):
 if __name__ == "__main__":
     try:
         sio.connect(SERVER_URL)
-
         while True:
             heartbeat()
             time.sleep(5)
