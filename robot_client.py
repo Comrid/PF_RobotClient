@@ -4,7 +4,7 @@ import threading
 from traceback import format_exc
 import socketio
 import time
-from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, HARDWARE_ENABLED, ROBOT_VERSION
+from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, ROBOT_VERSION
 from findee import Findee
 from pathlib import Path
 
@@ -20,12 +20,11 @@ def connect():
     print("<서버에 로봇 등록 요청>")
     print(f"ID              : {ROBOT_ID}")
     print(f"Name            : {ROBOT_NAME}")
-    print(f"HW Enabled      : {HARDWARE_ENABLED}")
     print(f"Version         : {ROBOT_VERSION}")
     print(f"Session ID      : {sio.sid}")
     print("====================")
     # 로봇 > 서버
-    sio.emit('robot_connected', {'robot_id': ROBOT_ID, 'robot_name': ROBOT_NAME, 'hardware_enabled': HARDWARE_ENABLED, 'robot_version': ROBOT_VERSION})
+    sio.emit('robot_connected', {'robot_id': ROBOT_ID, 'robot_name': ROBOT_NAME, 'robot_version': ROBOT_VERSION})
 
 @sio.event
 def robot_registered(data):

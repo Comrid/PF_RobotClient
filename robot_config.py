@@ -1,6 +1,4 @@
-import platform
-ROBOT_VERSION = "1.2.1"
-HARDWARE_ENABLED = platform.system() == "Linux"
+ROBOT_VERSION = "1.2.2"
 SERVER_URL = "https://pathfinder-kit.duckdns.org"
 ROBOT_ID = None
 ROBOT_NAME = None
