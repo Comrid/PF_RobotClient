@@ -13,6 +13,11 @@ sio = socketio.Client()
 stop_flag = False
 running_thread = None
 
+# 위젯 데이터 저장 (로봇은 단일 세션이므로 세션 ID 불필요)
+slider_data = {}   # {widget_id: [values]}
+pid_data = {}      # {widget_id: {'p': float, 'i': float, 'd': float}}
+gesture_data = {}  # {widget_id: gesture}
+
 #region 로봇 연결 이벤트
 # 연결 성공: 로봇 등록 요청
 @sio.event
@@ -77,10 +82,28 @@ def exec_code(code, session_id):
         def emit_text(text, widget_id):
             sio.emit('robot_emit_text', {'session_id': session_id, 'text': text, 'widget_id': widget_id})
 
+        # 위젯 데이터 조회 함수들
+        def get_slider_value(widget_id, default=None):
+            """슬라이더 위젯의 값을 가져옴"""
+            return slider_data.get(widget_id, default)
+        
+        def get_pid_value(widget_id, default=None):
+            """PID 위젯의 값을 가져옴 (p, i, d)"""
+            if default is None:
+                default = {'p': 0.0, 'i': 0.0, 'd': 0.0}
+            return pid_data.get(widget_id, default)
+        
+        def get_gesture_value(widget_id, default=None):
+            """제스처 위젯의 값을 가져옴"""
+            return gesture_data.get(widget_id, default)
+
         exec_namespace = {
             'Findee': Findee,
             'emit_image': emit_image,
             'emit_text': emit_text,
+            'get_slider_value': get_slider_value,
+            'get_pid_value': get_pid_value,
+            'get_gesture_value': get_gesture_value,
             'print': realtime_print
         }
         compiled_code = compile(code, '<string>', 'exec')
@@ -107,6 +130,44 @@ def execute_code(data):
         thread.start()
     except Exception as e:
         sio.emit('robot_stderr', {'session_id': session_id, 'output': f'코드 실행 중 오류가 발생했습니다: {str(e)}'})
+
+@sio.event
+def slider_update(data):
+    """슬라이더 업데이트 데이터 수신"""
+    try:
+        widget_id = data.get('widget_id')
+        values = data.get('values')
+        
+        if widget_id and values is not None:
+            slider_data[widget_id] = values
+    except Exception as e:
+        print(f"슬라이더 업데이트 처리 오류: {e}")
+
+@sio.event
+def pid_update(data):
+    """PID 업데이트 데이터 수신"""
+    try:
+        widget_id = data.get('widget_id')
+        p = data.get('p', 0.0)
+        i = data.get('i', 0.0)
+        d = data.get('d', 0.0)
+        
+        if widget_id:
+            pid_data[widget_id] = {'p': p, 'i': i, 'd': d}
+    except Exception as e:
+        print(f"PID 업데이트 처리 오류: {e}")
+
+@sio.event
+def gesture_update(data):
+    """제스처 업데이트 데이터 수신"""
+    try:
+        widget_id = data.get('widget_id')
+        gesture = data.get('gesture') or data.get('data')
+        
+        if widget_id and gesture is not None:
+            gesture_data[widget_id] = gesture
+    except Exception as e:
+        print(f"제스처 업데이트 처리 오류: {e}")
 
 @sio.event
 def stop_execution(data):
