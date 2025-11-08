@@ -176,40 +176,6 @@ def client_reset(data):
     ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
     force_git_pull(ScriptDir)
     subprocess.Popen(["sudo", "reboot"]) # 재부팅
-
-@sio.event
-def client_change_name(data):
-    """로봇 이름 변경 이벤트 핸들러"""
-    import subprocess
-    try:
-        new_name = data.get('new_name')
-        if not new_name:
-            print("새 로봇 이름이 제공되지 않았습니다.")
-            return
-        
-        ScriptDir = Path(__file__).parent.absolute()
-        
-        # robot_config.py의 ROBOT_NAME 변경
-        subprocess.run(
-            f"sed -i 's/ROBOT_NAME = .*/ROBOT_NAME = \"{new_name}\"/' {ScriptDir}/robot_config.py",
-            shell=True,
-            check=True
-        )
-        
-        print(f"로봇 이름이 '{new_name}'으로 변경되었습니다.")
-        
-        # 서비스 재시작 (변경사항 적용)
-        subprocess.Popen(
-            ['sudo', 'systemctl', 'restart', 'robot_client.service'],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception as e:
-        print(f"로봇 이름 변경 오류: {e}")
 #endregion
 
 if __name__ == "__main__":
