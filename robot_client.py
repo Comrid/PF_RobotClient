@@ -4,22 +4,373 @@ import threading
 from traceback import format_exc
 import socketio
 import time
+import asyncio
+import signal
+from asyncio import Queue
+try:
+    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
+except ImportError:
+    subprocess.run(['pip', 'install', 'aiortc', '--break-system-packages'], capture_output=True, text=True)
+    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
+import cv2
+import ctypes
+from pathlib import Path
 from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, ROBOT_VERSION
 from findee import Findee
-from pathlib import Path
-
 # 서버 연결 객체
 sio = socketio.Client()
-stop_flag = False
-running_thread = None
+current_version = Version(ROBOT_VERSION)
 
-# 위젯 데이터 저장 (로봇은 단일 세션이므로 세션 ID 불필요)
-slider_data = {}   # {widget_id: [values]}
-pid_data = {}      # {widget_id: {'p': float, 'i': float, 'd': float}}
-gesture_data = {}  # {widget_id: gesture}
+#region 스레드 관리
+class ThreadManager:
+    def __init__(self, thread: threading.Thread):
+        self.thread: threading.Thread = thread
+        self.stop_flag: bool = False
 
-#region 로봇 연결 이벤트
-# 연결 성공: 로봇 등록 요청
+session_threads: dict[str, ThreadManager] = {}
+#endregion
+
+#region ctypes 최적화
+_async_exc_func = ctypes.pythonapi.PyThreadState_SetAsyncExc
+_async_exc_func.argtypes = [ctypes.c_ulong, ctypes.py_object]
+_async_exc_func.restype = ctypes.c_int
+
+def _raise_exception_in_thread(thread: threading.Thread, exc_type=SystemExit) -> bool:
+    if thread is None or not thread.is_alive():
+        return False
+    tid = ctypes.c_ulong(thread.ident)
+    res = _async_exc_func(tid, ctypes.py_object(exc_type))
+    if res > 1:
+        _async_exc_func(tid, ctypes.py_object(0))
+        return False
+    return res == 1
+#endregion
+
+#region Error code
+ERR__WRTC_WORKER = 0x0001
+ERR__WRTC_WORKER_START = 0x0002
+ERR__WRTC_OFFER = 0x0003
+ERR__WRTC_OFFER_QUEUE = 0x0004
+ERR__WRTC_IMAGE_IO = 0x0005
+ERR__IMG_NOT_NUMPY = 0x0006
+ERR__WRTC_TEXT_IO = 0x0007
+ERR__WRTC_CANDIDATE_QUEUE = 0x0008
+ERR__WRTC_CANDIDATE_EXTRACT = 0x0009
+ERR__WRTC_CANDIDATE_HANDLE = 0x0010
+#endregion
+
+#region WebRTC 초기화
+webrtc_task_queue = Queue()
+
+class WebRTC_Manager:
+    def __init__(self, connection: RTCPeerConnection):
+        self.connection: RTCPeerConnection = connection
+        self.data_channel: RTCDataChannel | None = None
+        self.candidate_queue: list = []  # ICE candidate 큐 (setRemoteDescription 전에 도착한 candidate 저장)
+        self.remote_description_set: bool = False  # Remote description 설정 완료 플래그
+
+webrtc_loop = asyncio.new_event_loop()
+webrtc_sessions: dict[str, WebRTC_Manager] = {}
+#endregion
+
+#region WebRTC 워커 및 초기화
+async def webrtc_worker():
+    asyncio.set_event_loop(webrtc_loop)
+
+    while True:
+        try:
+            task_type, data = await webrtc_task_queue.get()
+
+            if task_type == 'offer':
+                session_id = data.get('session_id'); offer_dict = data.get('offer')
+                if session_id and offer_dict:
+                    asyncio.create_task(handle_webrtc_offer(session_id, offer_dict))
+
+            elif task_type == 'candidate':
+                session_id = data.get('session_id'); candidate_dict = data.get('candidate')
+                if session_id and candidate_dict:
+                    asyncio.create_task(handle_webrtc_ice_candidate(session_id, candidate_dict))
+
+            elif task_type == 'send_image':
+                session_id = data.get('session_id'); image_bytes = data.get('image_bytes'); widget_id = data.get('widget_id')
+                if session_id and image_bytes and widget_id:
+                    asyncio.create_task(send_image_via_webrtc(session_id, image_bytes, widget_id))
+
+            elif task_type == 'send_text':
+                session_id = data.get('session_id'); text = data.get('text'); widget_id = data.get('widget_id')
+                if session_id and text and widget_id:
+                    asyncio.create_task(send_text_via_webrtc_async(session_id, text, widget_id))
+
+            elif task_type == 'shutdown':
+                break
+
+        except Exception:
+            print(ERR__WRTC_WORKER)
+
+def start_webrtc_loop():
+    webrtc_loop.run_until_complete(webrtc_worker())
+#endregion
+
+#region WebRTC 시그널링 (연결 설정)
+@sio.event
+def webrtc_offer(data):
+    try:
+        webrtc_loop.call_soon_threadsafe(webrtc_task_queue.put_nowait, ('offer', data))
+    except Exception:
+        print(ERR__WRTC_OFFER_QUEUE)
+
+async def handle_webrtc_offer(session_id, offer_dict):
+    try:
+        # 기존 연결이 있으면 정리
+        old_session = webrtc_sessions.get(session_id)
+        if old_session:
+            await old_session.connection.close()
+            del webrtc_sessions[session_id]
+
+        # 새로운 피어 연결 생성
+        configuration = RTCConfiguration(iceServers=[])
+        pc = RTCPeerConnection(configuration=configuration)
+        webrtc_sessions[session_id] = WebRTC_Manager(pc)
+
+        # 데이터 채널 이벤트 처리
+        @pc.on("datachannel")
+        def on_datachannel(channel: RTCDataChannel):
+            webrtc_sessions[session_id].data_channel = channel
+
+            @channel.on("message")
+            def on_message(message):
+                pass
+
+        # ICE candidate 이벤트 처리
+        @pc.on("icecandidate")
+        def on_ice_candidate(candidate):
+            if candidate:
+                candidate_str = candidate.candidate
+                sio.emit('webrtc_ice_candidate', {
+                    'candidate': {
+                        'candidate': candidate_str,
+                        'sdpMLineIndex': candidate.sdpMLineIndex,
+                        'sdpMid': candidate.sdpMid
+                    },
+                    'session_id': session_id
+                })
+            else:
+                sio.emit('webrtc_ice_candidate', {
+                    'candidate': None,
+                    'session_id': session_id
+                })
+
+        # 연결 상태 변경 모니터링
+        @pc.on("connectionstatechange")
+        def on_connection_state_change():
+            if pc.connectionState == "failed" or pc.connectionState == "closed":
+                # 연결 실패 시 정리
+                if session_id in webrtc_sessions:
+                    del webrtc_sessions[session_id]
+
+        # ICE 수집 상태 변경 모니터링
+        @pc.on("icegatheringstatechange")
+        def on_ice_gathering_state_change():
+            if pc.iceGatheringState == "complete" and pc.localDescription:
+                extract_and_send_candidates_from_sdp(pc.localDescription.sdp, session_id)
+
+        # Offer 설정
+        offer = RTCSessionDescription(sdp=offer_dict['sdp'], type=offer_dict['type'])
+        await pc.setRemoteDescription(offer)
+
+        # Remote description 설정 완료 플래그 설정
+        session = webrtc_sessions[session_id]
+        session.remote_description_set = True
+
+        # 큐에 저장된 ICE candidate 처리
+        if session.candidate_queue:
+            for candidate_dict in session.candidate_queue:
+                try:
+                    candidate_str = candidate_dict.get('candidate', '')
+                    if candidate_str:
+                        candidate = create_ice_candidate(
+                            candidate_str,
+                            sdp_mid=candidate_dict.get('sdpMid'),
+                            sdp_m_line_index=candidate_dict.get('sdpMLineIndex')
+                        )
+                        if candidate:
+                            await pc.addIceCandidate(candidate)
+                except Exception:
+                    pass
+            session.candidate_queue = []  # 큐 비우기
+
+        # Answer 생성
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        # Answer 전송
+        sio.emit('webrtc_answer', {'answer': {'type': pc.localDescription.type, 'sdp': pc.localDescription.sdp}, 'session_id': session_id})
+    except Exception:
+        print(ERR__WRTC_OFFER)
+
+@sio.event
+def webrtc_ice_candidate(data):
+    try:
+        webrtc_loop.call_soon_threadsafe(webrtc_task_queue.put_nowait, ('candidate', data))
+    except Exception:
+        print(ERR__WRTC_CANDIDATE_QUEUE)
+
+async def handle_webrtc_ice_candidate(session_id, candidate_dict):
+    try:
+        session = webrtc_sessions.get(session_id)
+        if not session:
+            return
+
+        candidate_str = candidate_dict.get('candidate', '')
+        if not candidate_str:
+            return
+
+        # Remote description 체크
+        if not session.remote_description_set:
+            # 큐에 저장
+            session.candidate_queue.append(candidate_dict)
+            return
+
+        # Remote description이 설정되었으면 바로 추가
+        try:
+            candidate = create_ice_candidate(
+                candidate_str,
+                sdp_mid=candidate_dict.get('sdpMid'),
+                sdp_m_line_index=candidate_dict.get('sdpMLineIndex')
+            )
+            if candidate:
+                await session.connection.addIceCandidate(candidate)
+        except Exception:
+            pass  # 일부 candidate 실패는 정상
+
+    except Exception:
+        print(ERR__WRTC_CANDIDATE_HANDLE)
+#endregion
+
+#region WebRTC ICE Candidate 처리
+def extract_and_send_candidates_from_sdp(sdp: str, session_id: str):
+    """SDP에서 ICE candidate를 추출하여 브라우저로 전송 (aiortc는 Trickle ICE 미지원)"""
+    try:
+        # SDP에서 candidate 라인 찾기 (a=candidate: 제거하면서 바로 추출)
+        candidate_lines = [line[2:] for line in sdp.split('\n') if line.startswith('a=candidate:')]
+
+        if not candidate_lines:
+            return
+
+        # 각 candidate 전송 (파싱 없이 그대로 전송)
+        for candidate_str in candidate_lines:
+            try:
+                # 최소 길이 검증만 (파싱 불필요 - 브라우저에서 파싱함)
+                if len(candidate_str) < 20:
+                    continue
+
+                sio.emit('webrtc_ice_candidate', {
+                    'candidate': {'candidate': candidate_str, 'sdpMLineIndex': 0, 'sdpMid': '0'},
+                    'session_id': session_id
+                })
+            except Exception:
+                pass  # 개별 candidate 실패는 무시
+
+        # candidate 수집 완료 신호 전송
+        sio.emit('webrtc_ice_candidate', {'candidate': None, 'session_id': session_id})
+    except Exception:
+        print(ERR__WRTC_CANDIDATE_EXTRACT)
+
+def create_ice_candidate(candidate_str, sdp_mid=None, sdp_m_line_index=None):
+    """SDP candidate 문자열을 파싱하여 RTCIceCandidate 객체 생성"""
+    try:
+        if not candidate_str or not isinstance(candidate_str, str):
+            return None
+
+        # candidate: 접두사 제거
+        if candidate_str.startswith('candidate:'): candidate_str = candidate_str[10:]
+        parts = candidate_str.strip().split()
+        if len(parts) < 8:
+            return None
+
+        foundation = parts[0]
+        component = int(parts[1])
+        protocol = parts[2].upper()
+        priority = int(parts[3])
+        ip = parts[4]
+        port = int(parts[5])
+
+        # 한 번의 루프로 typ, raddr, rport 찾기
+        typ = 'host'  # 기본값
+        related_address = None
+        related_port = None
+
+        for i, part in enumerate(parts):
+            if part == 'typ' and i + 1 < len(parts):
+                typ = parts[i + 1]
+            elif part == 'raddr' and i + 1 < len(parts):
+                related_address = parts[i + 1]
+            elif part == 'rport' and i + 1 < len(parts):
+                related_port = int(parts[i + 1])
+
+        return RTCIceCandidate(
+            foundation=foundation,
+            component=component,
+            protocol=protocol,
+            priority=priority,
+            ip=ip,
+            port=port,
+            type=typ,
+            relatedAddress=related_address,
+            relatedPort=related_port,
+            sdpMid=sdp_mid,
+            sdpMLineIndex=sdp_m_line_index
+        )
+    except Exception:
+        return None
+#endregion
+
+#region WebRTC 데이터 전송
+# WebRTC 데이터 채널을 통해 데이터 전송 (비동기, 바이너리 프로토콜)
+async def send_image_via_webrtc(session_id, image_bytes, widget_id):
+    try:
+        session = webrtc_sessions.get(session_id)
+        if not session:
+            return
+
+        data_channel = session.data_channel
+        if not data_channel or data_channel.readyState != 'open':
+            return
+
+        # 바이너리 프로토콜: [타입(1)][widget_id 길이(1)][widget_id(가변)][이미지 데이터(가변)]
+        # 타입: 0x01 = image
+        widget_id_bytes = widget_id.encode('utf-8')
+        widget_id_len = len(widget_id_bytes)
+
+        header = bytes([0x01, widget_id_len]) + widget_id_bytes
+        data_channel.send(header + image_bytes)
+    except Exception:
+        pass
+
+async def send_text_via_webrtc_async(session_id, text, widget_id):
+    try:
+        session = webrtc_sessions.get(session_id)
+        if not session:
+            return
+
+        data_channel = session.data_channel
+        if not data_channel or data_channel.readyState != 'open':
+            return
+
+        # 바이너리 프로토콜: [타입(1)][widget_id 길이(1)][widget_id(가변)][텍스트 데이터(가변)]
+        # 타입: 0x02 = text
+        widget_id_bytes = widget_id.encode('utf-8')
+        widget_id_len = len(widget_id_bytes)
+        text_bytes = text.encode('utf-8')
+
+        header = bytes([0x02, widget_id_len]) + widget_id_bytes
+        data_channel.send(header + text_bytes)
+
+    except Exception:
+        pass
+#endregion
+
+#region SocketIO 이벤트 핸들러 (서버 연결)
 @sio.event
 def connect():
     print("<서버에 로봇 등록 요청>")
@@ -35,7 +386,6 @@ def connect():
 def robot_registered(data):
     print(f"로봇 등록 성공: {data.get('message')}") if data.get('success') else print(f"로봇 등록 실패: {data.get('error')}")
 
-# 연결 끊김: 5초 마다 재연결 시도
 @sio.event
 def disconnect():
     def reconnect_loop():
@@ -45,19 +395,17 @@ def disconnect():
             except Exception:
                 pass
     threading.Thread(target=reconnect_loop, daemon=True).start()
-
-def heartbeat():
-    if sio.connected: sio.emit('robot_heartbeat', {'robot_id': ROBOT_ID})
 #endregion
 
-#region 로봇 코드 실행
+#region 코드 실행
 def exec_code(code, session_id):
-    global stop_flag, running_thread
-    stop_flag = False
+    if session_id in session_threads:
+        session_threads[session_id].stop_flag = False
 
     def check_stop_flag(func):
         def wrapper(*args, **kwargs):
-            if stop_flag: return
+            if session_id in session_threads and session_threads[session_id].stop_flag:
+                return
             return func(*args, **kwargs)
         return wrapper
 
@@ -67,145 +415,104 @@ def exec_code(code, session_id):
         if output: sio.emit('robot_stdout', {'session_id': session_id, 'output': output})
 
     try:
+        #TODO 프레임 스킵
         @check_stop_flag
         def emit_image(image, widget_id):
-            if hasattr(image, 'shape'):  # numpy 배열인지 확인
-                import cv2
-                ok, buffer = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                if not ok:
+            if not hasattr(image, 'shape'):
+                print(ERR__IMG_NOT_NUMPY)
+                raise Exception("ERR__IMG_NOT_NUMPY")
+
+            ok, buffer = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            if not ok: return
+            image_bytes = buffer.tobytes()
+
+            session = webrtc_sessions.get(session_id)
+            data_channel = session.data_channel if session else None
+            if data_channel and data_channel.readyState == 'open':
+                try:
+                    webrtc_loop.call_soon_threadsafe(
+                        webrtc_task_queue.put_nowait,
+                        ('send_image', {'session_id': session_id, 'image_bytes': image_bytes, 'widget_id': widget_id})
+                    )
                     return
-                sio.emit('robot_emit_image', {'session_id': session_id, 'image_data': buffer.tobytes(), 'widget_id': widget_id})
-            else:
-                print(f"이미지가 numpy 배열이 아님 - 타입: {type(image)}")
+                except Exception:
+                    print(ERR__WRTC_IMAGE_IO)
+                    sio.emit('robot_emit_image', {'session_id': session_id, 'image_data': image_bytes, 'widget_id': widget_id})
 
         @check_stop_flag
         def emit_text(text, widget_id):
-            sio.emit('robot_emit_text', {'session_id': session_id, 'text': text, 'widget_id': widget_id})
-
-        # 위젯 데이터 조회 함수들
-        def get_slider_value(widget_id, default=None):
-            """슬라이더 위젯의 값을 가져옴"""
-            return slider_data.get(widget_id, default)
-        
-        def get_pid_value(widget_id, default=None):
-            """PID 위젯의 값을 가져옴 (p, i, d)"""
-            if default is None:
-                default = {'p': 0.0, 'i': 0.0, 'd': 0.0}
-            return pid_data.get(widget_id, default)
-        
-        def get_gesture_value(widget_id, default=None):
-            """제스처 위젯의 값을 가져옴"""
-            return gesture_data.get(widget_id, default)
+            session = webrtc_sessions.get(session_id)
+            data_channel = session.data_channel if session else None
+            if data_channel and data_channel.readyState == 'open':
+                try:
+                    webrtc_loop.call_soon_threadsafe(
+                        webrtc_task_queue.put_nowait,
+                        ('send_text', {'session_id': session_id, 'text': text, 'widget_id': widget_id})
+                    )
+                    return
+                except Exception:
+                    print(ERR__WRTC_TEXT_IO)
+                    sio.emit('robot_emit_text', {'session_id': session_id, 'text': text, 'widget_id': widget_id})
 
         exec_namespace = {
             'Findee': Findee,
             'emit_image': emit_image,
             'emit_text': emit_text,
-            'get_slider_value': get_slider_value,
-            'get_pid_value': get_pid_value,
-            'get_gesture_value': get_gesture_value,
             'print': realtime_print
         }
         compiled_code = compile(code, '<string>', 'exec')
         exec(compiled_code, exec_namespace)
     except Exception:
-        # 오류 출력
         for line in format_exc().splitlines():
             sio.emit('robot_stderr', {'session_id': session_id, 'output': line})
     finally:
-        # 추적 딕셔너리에서 제거
-        running_thread = None
-        stop_flag = False
-        print(f"DEBUG: Session {session_id}: 스레드 정리 완료")
+        # 세션별 정리
+        if session_id in session_threads:
+            del session_threads[session_id]
         sio.emit('robot_finished', {'session_id': session_id})
 
 @sio.event
 def execute_code(data):
-    global running_thread
     try:
         code = data.get('code', '')
         session_id = data.get('session_id', '')
+
+        # 기존 실행 중인 스레드가 있으면 먼저 정리
+        if session_id in session_threads:
+            old_manager = session_threads[session_id]
+            if old_manager.thread.is_alive():
+                old_manager.stop_flag = True
+                _raise_exception_in_thread(old_manager.thread, SystemExit)
+                old_manager.thread.join(timeout=0.5)
+
+        # 새 스레드 시작
         thread = threading.Thread(target=exec_code, args=(code, session_id), daemon=True)
-        running_thread = thread
+        session_threads[session_id] = ThreadManager(thread)
         thread.start()
     except Exception as e:
-        sio.emit('robot_stderr', {'session_id': session_id, 'output': f'코드 실행 중 오류가 발생했습니다: {str(e)}'})
-
-@sio.event
-def slider_update(data):
-    """슬라이더 업데이트 데이터 수신"""
-    try:
-        widget_id = data.get('widget_id')
-        values = data.get('values')
-        
-        if widget_id and values is not None:
-            slider_data[widget_id] = values
-    except Exception as e:
-        print(f"슬라이더 업데이트 처리 오류: {e}")
-
-@sio.event
-def pid_update(data):
-    """PID 업데이트 데이터 수신"""
-    try:
-        widget_id = data.get('widget_id')
-        p = data.get('p', 0.0)
-        i = data.get('i', 0.0)
-        d = data.get('d', 0.0)
-        
-        if widget_id:
-            pid_data[widget_id] = {'p': p, 'i': i, 'd': d}
-    except Exception as e:
-        print(f"PID 업데이트 처리 오류: {e}")
-
-@sio.event
-def gesture_update(data):
-    """제스처 업데이트 데이터 수신"""
-    try:
-        widget_id = data.get('widget_id')
-        gesture = data.get('gesture') or data.get('data')
-        
-        if widget_id and gesture is not None:
-            gesture_data[widget_id] = gesture
-    except Exception as e:
-        print(f"제스처 업데이트 처리 오류: {e}")
+        sio.emit('robot_stderr', {'session_id': session_id, 'output': f'코드 실행 중 오류: {str(e)}'})
 
 @sio.event
 def stop_execution(data):
-    global running_thread, stop_flag
     try:
         session_id = data.get('session_id', '')
-        thread = running_thread
-        stop_flag = True
 
-        if thread is None:
+        if session_id not in session_threads:
             sio.emit('robot_stderr', {'session_id': session_id, 'output': '실행 중인 코드가 없습니다.'})
             return
 
-        if thread.is_alive():
-            def raise_in_thread(thread, exc_type = SystemExit):
-                import ctypes
-                if thread is None or not thread.is_alive():
-                    return False
+        manager = session_threads[session_id]
+        manager.stop_flag = True
 
-                func = ctypes.pythonapi.PyThreadState_SetAsyncExc
-                func.argtypes = [ctypes.c_ulong, ctypes.py_object]
-                func.restype = ctypes.c_int
+        if manager.thread.is_alive():
+            _raise_exception_in_thread(manager.thread, SystemExit)
+            manager.thread.join(timeout=1.0)
 
-                tid = ctypes.c_ulong(thread.ident)
-                res = func(tid, ctypes.py_object(exc_type))
-
-                if res > 1:
-                    func(tid, ctypes.py_object(0))
-                    return False
-                return res == 1
-
-            raise_in_thread(thread, SystemExit)
-            thread.join(timeout=1.0)
-
-            running_thread = None
-            stop_flag = False
+        # 세션별 정리
+        if session_id in session_threads:
+            del session_threads[session_id]
     except Exception as e:
-        sio.emit('robot_stderr', {'session_id': session_id, 'output': f'코드 중지 중 오류가 발생했습니다: {str(e)}'})
+        sio.emit('robot_stderr', {'session_id': session_id, 'output': f'코드 중지 중 오류: {str(e)}'})
 #endregion
 
 #region 로봇 업데이트/초기화
@@ -216,7 +523,6 @@ def force_git_pull(ScriptDir):
 
 @sio.event
 def client_update(data):
-    import subprocess, re
     try:
         ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
         RobotID, RobotName = ROBOT_ID, ROBOT_NAME # 현재 로봇 설정 저장
@@ -228,7 +534,7 @@ def client_update(data):
         subprocess.run(['sudo', 'systemctl', 'restart', 'robot_client.service'], capture_output=True, text=True, timeout=10)
     except subprocess.TimeoutExpired:
         pass
-    except Exception as e:
+    except Exception:
         pass
 
 @sio.event
@@ -239,11 +545,29 @@ def client_reset(data):
     subprocess.Popen(["sudo", "reboot"]) # 재부팅
 #endregion
 
+#region Signal handler
+def signal_handler(signum, frame):
+    if webrtc_sessions:
+        try:
+            async def cleanup_async():
+                tasks = [session.connection.close() for session in webrtc_sessions.values()]
+                await asyncio.gather(*tasks, return_exceptions=True)
+                webrtc_sessions.clear()
+            if webrtc_loop and webrtc_loop.is_running():
+                webrtc_loop.run_until_complete(cleanup_async())
+            else:
+                asyncio.run(cleanup_async())
+        except Exception:
+            pass
+    sio.disconnect()
+    sys.exit(0)
+#endregion
+
 if __name__ == "__main__":
-    try:
-        sio.connect(SERVER_URL)
-        while True:
-            heartbeat()
-            time.sleep(5)
-    except KeyboardInterrupt:
-        sio.disconnect()
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    webrtc_thread = threading.Thread(target=start_webrtc_loop, daemon=True)
+    webrtc_thread.start()
+    sio.connect(SERVER_URL)
+    while True:
+        time.sleep(5)
