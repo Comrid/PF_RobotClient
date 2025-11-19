@@ -11,6 +11,7 @@ import cv2
 import ctypes
 from pathlib import Path
 import sys
+import json
 from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, ROBOT_VERSION
 from findee import Findee
 try:
@@ -21,19 +22,8 @@ except ImportError:
 try:
     from packaging.version import Version
 except ImportError:
-    try:
-        subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True, check=True)
-        from packaging.version import Version
-    except (ImportError, subprocess.CalledProcessError):
-        # packaging 모듈이 없어도 동작하도록 fallback
-        class Version:
-            def __init__(self, version_str):
-                self.version_str = version_str
-            def __lt__(self, other):
-                # 간단한 버전 비교 (정확하지 않지만 오류 방지)
-                return self.version_str < other.version_str if isinstance(other, Version) else False
-            def __gt__(self, other):
-                return self.version_str > other.version_str if isinstance(other, Version) else False
+    subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
+    from packaging.version import Version
 
 
 # 서버 연결 객체
@@ -90,6 +80,10 @@ class WebRTC_Manager:
 
 webrtc_loop = asyncio.new_event_loop()
 webrtc_sessions: dict[str, WebRTC_Manager] = {}
+
+# 위젯 데이터 저장소
+PID_Wdata: dict[str, dict] = {}  # {"위젯이름": {"p": 1.0, "i": 0.5, "d": 0.2}}
+Slider_Wdata: dict[str, list] = {}  # {"위젯이름": [10, 20, 30]}
 #endregion
 
 #region WebRTC 워커 및 초기화
@@ -158,7 +152,30 @@ async def handle_webrtc_offer(session_id, offer_dict):
 
             @channel.on("message")
             def on_message(message):
-                pass
+                try:
+                    # JSON 문자열로 전송된 위젯 데이터 파싱
+                    data = json.loads(message)
+                    widget_type = data.get('type')
+                    widget_id = data.get('widget_id')
+                    
+                    if not widget_id:
+                        return
+                    
+                    if widget_type == "pid_update":
+                        PID_Wdata[widget_id] = {
+                            "p": float(data.get('p', 0.0)),
+                            "i": float(data.get('i', 0.0)),
+                            "d": float(data.get('d', 0.0))
+                        }
+                    elif widget_type == "slider_update":
+                        values = data.get('values', [])
+                        if isinstance(values, list):
+                            Slider_Wdata[widget_id] = values
+                except json.JSONDecodeError:
+                    # JSON이 아닌 경우 무시 (이미지/텍스트 데이터일 수 있음)
+                    pass
+                except Exception as e:
+                    print(f"위젯 데이터 수신 오류: {e}")
 
         # ICE candidate 이벤트 처리
         @pc.on("icecandidate")
@@ -416,6 +433,19 @@ def disconnect():
     threading.Thread(target=reconnect_loop, daemon=True).start()
 #endregion
 
+#region 위젯 데이터 접근 함수
+def get_pid(widget_id: str) -> tuple[float | None, float | None, float | None]:
+    """PID 위젯 데이터 가져오기"""
+    data = PID_Wdata.get(widget_id)
+    if data:
+        return data['p'], data['i'], data['d']
+    return None, None, None
+
+def get_slider(widget_id: str) -> list:
+    """Slider 위젯 데이터 가져오기 (항상 배열)"""
+    return Slider_Wdata.get(widget_id, [])
+#endregion
+
 #region 코드 실행
 def exec_code(code, session_id):
     if session_id in session_threads:
@@ -477,7 +507,9 @@ def exec_code(code, session_id):
             'Findee': Findee,
             'emit_image': emit_image,
             'emit_text': emit_text,
-            'print': realtime_print
+            'print': realtime_print,
+            'get_pid': get_pid,
+            'get_slider': get_slider
         }
         compiled_code = compile(code, '<string>', 'exec')
         exec(compiled_code, exec_namespace)
@@ -533,6 +565,31 @@ def stop_execution(data):
             del session_threads[session_id]
     except Exception as e:
         sio.emit('robot_stderr', {'session_id': session_id, 'output': f'코드 중지 중 오류: {str(e)}'})
+
+@sio.event
+def pid_update(data):
+    """PID 업데이트 데이터 수신 (SocketIO fallback)"""
+    try:
+        widget_id = data.get('widget_id')
+        if widget_id:
+            PID_Wdata[widget_id] = {
+                "p": float(data.get('p', 0.0)),
+                "i": float(data.get('i', 0.0)),
+                "d": float(data.get('d', 0.0))
+            }
+    except Exception as e:
+        print(f"PID 업데이트 수신 오류: {e}")
+
+@sio.event
+def slider_update(data):
+    """Slider 업데이트 데이터 수신 (SocketIO fallback)"""
+    try:
+        widget_id = data.get('widget_id')
+        values = data.get('values', [])
+        if widget_id and isinstance(values, list):
+            Slider_Wdata[widget_id] = values
+    except Exception as e:
+        print(f"Slider 업데이트 수신 오류: {e}")
 #endregion
 
 #region 로봇 업데이트/초기화
