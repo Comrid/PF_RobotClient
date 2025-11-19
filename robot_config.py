@@ -1,4 +1,4 @@
-ROBOT_VERSION = "1.4.1"
+ROBOT_VERSION = "1.4.2"
 SERVER_URL = "https://pathfinder-kit.duckdns.org"
 ROBOT_ID = None
 ROBOT_NAME = None

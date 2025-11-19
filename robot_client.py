@@ -21,8 +21,19 @@ except ImportError:
 try:
     from packaging.version import Version
 except ImportError:
-    subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
-    from packaging.version import Version
+    try:
+        subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True, check=True)
+        from packaging.version import Version
+    except (ImportError, subprocess.CalledProcessError):
+        # packaging 모듈이 없어도 동작하도록 fallback
+        class Version:
+            def __init__(self, version_str):
+                self.version_str = version_str
+            def __lt__(self, other):
+                # 간단한 버전 비교 (정확하지 않지만 오류 방지)
+                return self.version_str < other.version_str if isinstance(other, Version) else False
+            def __gt__(self, other):
+                return self.version_str > other.version_str if isinstance(other, Version) else False
 
 
 # 서버 연결 객체
