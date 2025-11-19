@@ -7,16 +7,24 @@ import time
 import asyncio
 import signal
 from asyncio import Queue
+import cv2
+import ctypes
+from pathlib import Path
+import sys
+from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, ROBOT_VERSION
+from findee import Findee
 try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
 except ImportError:
     subprocess.run(['pip', 'install', 'aiortc', '--break-system-packages'], capture_output=True, text=True)
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
-import cv2
-import ctypes
-from pathlib import Path
-from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, ROBOT_VERSION
-from findee import Findee
+try:
+    from packaging.version import Version
+except ImportError:
+    subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
+    from packaging.version import Version
+
+
 # 서버 연결 객체
 sio = socketio.Client()
 current_version = Version(ROBOT_VERSION)
@@ -470,6 +478,7 @@ def exec_code(code, session_id):
         if session_id in session_threads:
             del session_threads[session_id]
         sio.emit('robot_finished', {'session_id': session_id})
+        Findee().stop()
 
 @sio.event
 def execute_code(data):
