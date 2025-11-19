@@ -15,6 +15,11 @@ import json
 from robot_config import ROBOT_ID, ROBOT_NAME, SERVER_URL, ROBOT_VERSION
 from findee import Findee
 try:
+    import psutil
+except ImportError:
+    subprocess.run(['pip', 'install', 'psutil', '--break-system-packages'], capture_output=True, text=True)
+    import psutil
+try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
 except ImportError:
     subprocess.run(['pip', 'install', 'aiortc', '--break-system-packages'], capture_output=True, text=True)
@@ -24,11 +29,6 @@ try:
 except ImportError:
     subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
     from packaging.version import Version
-try:
-    import psutil
-except ImportError:
-    subprocess.run(['pip', 'install', 'psutil', '--break-system-packages'], capture_output=True, text=True)
-    import psutil
 
 
 # 서버 연결 객체
@@ -89,10 +89,6 @@ webrtc_sessions: dict[str, WebRTC_Manager] = {}
 # 위젯 데이터 저장소
 PID_Wdata: dict[str, dict] = {}  # {"위젯이름": {"p": 1.0, "i": 0.5, "d": 0.2}}
 Slider_Wdata: dict[str, list] = {}  # {"위젯이름": [10, 20, 30]}
-
-# Robot Monitoring 위젯 활성화 상태
-robot_monitoring_active: dict[str, bool] = {}  # {session_id: True/False}
-robot_monitoring_start_time: dict[str, float] = {}  # {session_id: start_time}
 #endregion
 
 #region WebRTC 워커 및 초기화
@@ -123,10 +119,10 @@ async def webrtc_worker():
                 if session_id and text and widget_id:
                     asyncio.create_task(send_text_via_webrtc_async(session_id, text, widget_id))
 
-            elif task_type == 'send_monitoring':
-                session_id = data.get('session_id'); monitoring_data = data.get('monitoring_data'); widget_id = data.get('widget_id')
-                if session_id and monitoring_data and widget_id:
-                    asyncio.create_task(send_monitoring_via_webrtc_async(session_id, monitoring_data, widget_id))
+            elif task_type == 'send_system_info':
+                session_id = data.get('session_id')
+                if session_id:
+                    asyncio.create_task(send_system_info_via_webrtc(session_id))
 
             elif task_type == 'shutdown':
                 break
@@ -163,6 +159,22 @@ async def handle_webrtc_offer(session_id, offer_dict):
         @pc.on("datachannel")
         def on_datachannel(channel: RTCDataChannel):
             webrtc_sessions[session_id].data_channel = channel
+            
+            # 시스템 정보 전송 루프 시작
+            async def system_info_loop():
+                while session_id in webrtc_sessions:
+                    session = webrtc_sessions.get(session_id)
+                    if session and session.data_channel and session.data_channel.readyState == 'open':
+                        try:
+                            webrtc_loop.call_soon_threadsafe(
+                                webrtc_task_queue.put_nowait,
+                                ('send_system_info', {'session_id': session_id})
+                            )
+                        except Exception:
+                            pass
+                    await asyncio.sleep(1.0)  # 1초마다 전송
+            
+            asyncio.create_task(system_info_loop())
 
             @channel.on("message")
             def on_message(message):
@@ -185,15 +197,6 @@ async def handle_webrtc_offer(session_id, offer_dict):
                         values = data.get('values', [])
                         if isinstance(values, list):
                             Slider_Wdata[widget_id] = values
-                    elif widget_type == "robot_monitoring_enable":
-                        # 위젯 활성화 요청
-                        robot_monitoring_active[session_id] = True
-                        robot_monitoring_start_time[session_id] = time.time()
-                        # 모니터링 루프 시작
-                        threading.Thread(target=lambda: start_monitoring_loop(session_id, widget_id), daemon=True).start()
-                    elif widget_type == "robot_monitoring_disable":
-                        # 위젯 비활성화 요청
-                        robot_monitoring_active[session_id] = False
                 except json.JSONDecodeError:
                     # JSON이 아닌 경우 무시 (이미지/텍스트 데이터일 수 있음)
                     pass
@@ -428,8 +431,8 @@ async def send_text_via_webrtc_async(session_id, text, widget_id):
     except Exception:
         pass
 
-async def send_monitoring_via_webrtc_async(session_id, monitoring_data, widget_id):
-    """Robot Monitoring 데이터를 WebRTC DataChannel로 전송"""
+async def send_system_info_via_webrtc(session_id):
+    """시스템 정보를 WebRTC DataChannel로 전송"""
     try:
         session = webrtc_sessions.get(session_id)
         if not session:
@@ -439,91 +442,35 @@ async def send_monitoring_via_webrtc_async(session_id, monitoring_data, widget_i
         if not data_channel or data_channel.readyState != 'open':
             return
 
-        # JSON 문자열로 전송
-        payload = {
-            'type': 'robot_monitoring',
-            'widget_id': widget_id,
-            **monitoring_data
-        }
-        data_channel.send(json.dumps(payload))
+        # 시스템 정보 수집
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        ram_percent = memory.percent
+        ram_used = memory.used / (1024**3)  # GB
+        ram_total = memory.total / (1024**3)  # GB
+        
+        # 온도 정보 (라즈베리파이)
+        temp = None
+        try:
+            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                temp_raw = int(f.read().strip())
+                temp = temp_raw / 1000.0  # 섭씨
+        except:
+            pass
 
+        # JSON 형식으로 전송
+        system_info = {
+            'type': 'system_info',
+            'cpu_percent': round(cpu_percent, 1),
+            'ram_percent': round(ram_percent, 1),
+            'ram_used': round(ram_used, 2),
+            'ram_total': round(ram_total, 2),
+            'temp': round(temp, 1) if temp else None
+        }
+        
+        data_channel.send(json.dumps(system_info))
     except Exception:
         pass
-#endregion
-
-#region Robot Monitoring 데이터 수집 및 전송
-def get_robot_monitoring_data(session_id):
-    """로봇 모니터링 데이터 수집"""
-    try:
-        # CPU 전체 사용률
-        cpu_percent = psutil.cpu_percent(interval=0.1)
-        
-        # 각 CPU 코어 사용률 (라즈베리파이 제로 2W는 4코어)
-        cpu_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
-        if len(cpu_per_core) > 4:
-            cpu_per_core = cpu_per_core[:4]  # 최대 4개만
-        elif len(cpu_per_core) < 4:
-            cpu_per_core = list(cpu_per_core) + [0.0] * (4 - len(cpu_per_core))
-        
-        # 메모리 사용률
-        memory = psutil.virtual_memory()
-        memory_percent = memory.percent
-        
-        # Uptime
-        start_time = robot_monitoring_start_time.get(session_id, time.time())
-        uptime_seconds = int(time.time() - start_time)
-        
-        # 온도 (vcgencmd 사용)
-        temperature = None
-        try:
-            result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True, timeout=1)
-            if result.returncode == 0:
-                temp_str = result.stdout.strip()
-                # "temp=45.0'C" 형식에서 숫자 추출
-                temp_match = temp_str.split('=')[1].split("'")[0]
-                temperature = float(temp_match)
-        except Exception:
-            pass
-        
-        return {
-            'cpu_percent': round(cpu_percent, 1),
-            'cpu_per_core': [round(core, 1) for core in cpu_per_core],
-            'memory_percent': round(memory_percent, 1),
-            'uptime_seconds': uptime_seconds,
-            'temperature': temperature
-        }
-    except Exception as e:
-        print(f"모니터링 데이터 수집 오류: {e}")
-        return None
-
-def start_monitoring_loop(session_id, widget_id):
-    """모니터링 데이터를 1초마다 전송하는 루프"""
-    while robot_monitoring_active.get(session_id, False):
-        try:
-            # 위젯이 활성화되어 있는지 확인
-            if not robot_monitoring_active.get(session_id, False):
-                break
-            
-            # 모니터링 데이터 수집
-            monitoring_data = get_robot_monitoring_data(session_id)
-            if monitoring_data:
-                # WebRTC로 전송
-                try:
-                    webrtc_loop.call_soon_threadsafe(
-                        webrtc_task_queue.put_nowait,
-                        ('send_monitoring', {
-                            'session_id': session_id,
-                            'monitoring_data': monitoring_data,
-                            'widget_id': widget_id
-                        })
-                    )
-                except Exception:
-                    pass
-            
-            time.sleep(1.0)  # 1초 대기
-        except Exception as e:
-            print(f"모니터링 루프 오류: {e}")
-            time.sleep(1.0)
 #endregion
 
 #region SocketIO 이벤트 핸들러 (서버 연결)
