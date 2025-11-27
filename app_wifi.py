@@ -52,9 +52,10 @@ def connect():
         password = data.get('password')
 
         # 기본 검증
-        if not all([ssid, password]):
-            return jsonify({"success": False, "error": "SSID, 비밀번호를 모두 입력해주세요."}), 400
-        if not (8 <= len(password) <= 63):
+        if not ssid:
+            return jsonify({"success": False, "error": "SSID를 입력해주세요."}), 400
+        # 비밀번호가 있는 경우에만 길이 검증
+        if password and not (8 <= len(password) <= 63):
             return jsonify({"success": False, "error": "WiFi 비밀번호는 8자 이상, 63자 이하여야 합니다."}), 400
 
         if platform.system() == "Linux":
@@ -74,12 +75,21 @@ def connect():
                 subprocess.run(add_command, check=True, text=True, capture_output=True, timeout=15)
 
                 # 생성된 프로필에 비밀번호와 자동 연결 설정
-                modify_command = [
-                    "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
-                    "wifi-sec.key-mgmt", "wpa-psk",
-                    "wifi-sec.psk", password,
-                    "connection.autoconnect", "yes"
-                ]
+                if password and password.strip():
+                    # 비밀번호가 있는 경우: WPA-PSK 사용
+                    modify_command = [
+                        "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
+                        "wifi-sec.key-mgmt", "wpa-psk",
+                        "wifi-sec.psk", password,
+                        "connection.autoconnect", "yes"
+                    ]
+                else:
+                    # 비밀번호가 없는 경우: 오픈 네트워크 (key-mgmt: none)
+                    modify_command = [
+                        "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
+                        "wifi-sec.key-mgmt", "none",
+                        "connection.autoconnect", "yes"
+                    ]
                 subprocess.run(modify_command, check=True, text=True, capture_output=True, timeout=15)
 
                 # 로봇 설정 업데이트
@@ -111,3 +121,4 @@ def connect():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
+

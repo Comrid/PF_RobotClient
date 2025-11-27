@@ -51,9 +51,9 @@
                 <input type="text" class="form-input" id="ssid" name="ssid" placeholder="와이파이 이름" required>
             </div>
             <div class="form-group">
-                <label class="form-label" for="password">WiFi 비밀번호</label>
+                <label class="form-label" for="password">WiFi 비밀번호 (선택사항)</label>
                 <div class="input-wrapper">
-                    <input type="password" class="form-input" id="password" name="password" placeholder="8자 이상 입력하세요" required minlength="8" maxlength="63">
+                    <input type="password" class="form-input" id="password" name="password" placeholder="비밀번호가 없으면 비워두세요 (8자 이상 입력)" minlength="8" maxlength="63">
                     <button type="button" class="password-toggle" id="passwordToggle" onclick="togglePassword()">
                         표시
                     </button>
@@ -142,25 +142,28 @@
             const ssid = document.getElementById('ssid').value.trim();
             const password = document.getElementById('password').value.trim();
 
-            if (!ssid || !password) {
-                showStatus('WiFi 이름, 비밀번호를 모두 입력해주세요.', true);
+            if (!ssid) {
+                showStatus('WiFi 이름을 입력해주세요.', true);
                 return;
             }
 
-            // WiFi 비밀번호 길이 검증
-            if (password.length < 8) {
-                showStatus('WiFi 비밀번호는 8자 이상이어야 합니다.', true);
-                return;
-            }
-            if (password.length > 63) {
-                showStatus('WiFi 비밀번호는 63자 이하여야 합니다.', true);
-                return;
+            // WiFi 비밀번호가 입력된 경우에만 길이 검증
+            if (password && password.length > 0) {
+                if (password.length < 8) {
+                    showStatus('WiFi 비밀번호는 8자 이상이어야 합니다.', true);
+                    return;
+                }
+                if (password.length > 63) {
+                    showStatus('WiFi 비밀번호는 63자 이하여야 합니다.', true);
+                    return;
+                }
             }
 
+            const passwordDisplay = password ? password : '(비밀번호 없음)';
             const confirmed = confirm(
                 `WiFi 정보를 확인해주세요:\n\n` +
                 `WiFi 이름: ${ssid}\n` +
-                `비밀번호: ${password}\n\n` +
+                `비밀번호: ${passwordDisplay}\n\n` +
                 `입력하신 정보가 확실한가요?`
             );
             if (!confirmed) {return;}
@@ -229,3 +232,6 @@
     </script>
 </body>
 </html>
+
+
+
