@@ -83,24 +83,14 @@ def connect():
                         "wifi-sec.psk", password,
                         "connection.autoconnect", "yes"
                     ]
-                    subprocess.run(modify_command, check=True, text=True, capture_output=True, timeout=15)
                 else:
-                    # 비밀번호가 없는 경우: Enhanced Open (OWE) 먼저 시도
-                    # Enhanced Open은 WPA3의 OWE (Opportunistic Wireless Encryption) 사용
-                    modify_command_owe = [
+                    # 비밀번호가 없는 경우: 오픈 네트워크 (key-mgmt: none)
+                    modify_command = [
                         "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
-                        "wifi-sec.key-mgmt", "owe",
+                        "wifi-sec.key-mgmt", "none",
                         "connection.autoconnect", "yes"
                     ]
-                    result = subprocess.run(modify_command_owe, capture_output=True, text=True, timeout=15)
-                    if result.returncode != 0:
-                        # OWE가 실패하면 일반 오픈 네트워크로 시도
-                        modify_command_none = [
-                            "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
-                            "wifi-sec.key-mgmt", "none",
-                            "connection.autoconnect", "yes"
-                        ]
-                        subprocess.run(modify_command_none, check=True, text=True, capture_output=True, timeout=15)
+                subprocess.run(modify_command, check=True, text=True, capture_output=True, timeout=15)
 
                 # 로봇 설정 업데이트
                 ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
