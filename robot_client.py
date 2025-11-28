@@ -17,17 +17,17 @@ from findee import Findee
 try:
     import psutil
 except ImportError:
-    subprocess.run(['pip', 'install', 'psutil', '--break-system-packages'], capture_output=True, text=True)
+    subprocess.run(['sudo', 'pip', 'install', 'psutil', '--break-system-packages'], capture_output=True, text=True)
     import psutil
 try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
 except ImportError:
-    subprocess.run(['pip', 'install', 'aiortc', '--break-system-packages'], capture_output=True, text=True)
+    subprocess.run(['sudo', 'pip', 'install', 'aiortc', '--break-system-packages'], capture_output=True, text=True)
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCDataChannel, RTCConfiguration
 try:
     from packaging.version import Version
 except ImportError:
-    subprocess.run(['pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
+    subprocess.run(['sudo', 'pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
     from packaging.version import Version
 
 
