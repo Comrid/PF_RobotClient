@@ -65,32 +65,29 @@ def connect():
                 subprocess.run(["sudo", "nmcli", "connection", "delete", PROFILE_NAME], capture_output=True)
 
                 # 새로운 프로필 추가
-                add_command = [
-                    "sudo", "nmcli", "connection", "add",
-                    "type", "wifi",
-                    "con-name", PROFILE_NAME,
-                    "ifname", "wlan0",
-                    "ssid", ssid
-                ]
-                subprocess.run(add_command, check=True, text=True, capture_output=True, timeout=15)
-
-                # 생성된 프로필에 비밀번호와 자동 연결 설정
                 if password and password.strip():
-                    # 비밀번호가 있는 경우: WPA-PSK 사용
-                    modify_command = [
-                        "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
+                    # 비밀번호가 있는 경우: 프로필 생성 시 모든 설정 포함
+                    add_command = [
+                        "sudo", "nmcli", "connection", "add",
+                        "type", "wifi",
+                        "con-name", PROFILE_NAME,
+                        "ifname", "wlan0",
+                        "ssid", ssid,
                         "wifi-sec.key-mgmt", "wpa-psk",
                         "wifi-sec.psk", password,
                         "connection.autoconnect", "yes"
                     ]
                 else:
-                    # 비밀번호가 없는 경우: 오픈 네트워크 (key-mgmt: none)
-                    modify_command = [
-                        "sudo", "nmcli", "connection", "modify", PROFILE_NAME,
-                        "wifi-sec.key-mgmt", "none",
+                    # 비밀번호가 없는 경우: 보안 설정 없이 프로필 생성 (NetworkManager가 자동 감지)
+                    add_command = [
+                        "sudo", "nmcli", "connection", "add",
+                        "type", "wifi",
+                        "con-name", PROFILE_NAME,
+                        "ifname", "wlan0",
+                        "ssid", ssid,
                         "connection.autoconnect", "yes"
                     ]
-                subprocess.run(modify_command, check=True, text=True, capture_output=True, timeout=15)
+                subprocess.run(add_command, check=True, text=True, capture_output=True, timeout=15)
 
                 # 로봇 설정 업데이트
                 ScriptDir = Path(__file__).parent.absolute() # 현재 파일의 디렉토리
