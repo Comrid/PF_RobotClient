@@ -9,6 +9,7 @@ import os
 import time
 import atexit
 import json
+import cv2
 from pathlib import Path
 
 import logging
@@ -18,8 +19,8 @@ os.environ['LIBCAMERA_LOG_FILE'] = '/dev/null' # disable logging
 
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2
+import numpy as np
 # from picamera2.encoders import JpegEncoder
-import cv2
 
 USE_DEBUG = True
 
@@ -399,6 +400,86 @@ class Findee:
         self.config = new_config
 
         print(f"DEBUG: 카메라 해상도가 {resolution}으로 변경되었습니다.")
+#endregion
+
+#region: Image Processing
+    def mask_image(self, hsv_image, slider_values: list[int]):
+        if slider_values is None or len(slider_values) != 6:
+            print("배열의 값이 6개가 아닙니다.")
+            return None
+        if hsv_image is None or not isinstance(hsv_image, np.ndarray):
+            print("이미지가 None 이거나 또는 np.ndarray가 아닙니다.")
+            return None
+
+        lower_bound = np.array([int(slider_values[0]), int(slider_values[2]), int(slider_values[4])])
+        upper_bound = np.array([int(slider_values[1]), int(slider_values[3]), int(slider_values[5])])
+
+        return cv2.inRange(hsv_image, lower_bound, upper_bound)
+
+    def detect_traffic_light(self, hsv_image, green_bound=None, red_bound=None):
+        """
+        신호등 색상 인식 함수 (Contour 기반 필터링)
+        
+        Args:
+            hsv_image: HSV 형식의 이미지 (numpy array)
+            green_bound: 초록색 HSV 범위 [h_lower, h_upper, s_lower, s_upper, v_lower, v_upper]
+                        기본값: [30, 80, 20, 255, 100, 255]
+            red_bound: 빨간색 HSV 범위 [h_lower, h_upper, s_lower, s_upper, v_lower, v_upper]
+                      기본값: [160, 180, 90, 255, 200, 255]
+        
+        Returns:
+            0: 인식되지 않음
+            1: 초록색 인식
+            2: 빨간색 인식
+        """
+        if hsv_image is None or not isinstance(hsv_image, np.ndarray):
+            return 0
+        
+        # 기본값 설정
+        if green_bound is None:
+            green_bound = [30, 80, 20, 255, 100, 255]
+        if red_bound is None:
+            red_bound = [160, 180, 90, 255, 200, 255]
+        
+        # 입력 검증
+        if len(green_bound) != 6 or len(red_bound) != 6:
+            print("HSV 범위 배열은 6개의 요소를 가져야 합니다.")
+            return 0
+        
+        # 초록색 HSV 범위
+        green_lower = np.array([green_bound[0], green_bound[2], green_bound[4]])
+        green_upper = np.array([green_bound[1], green_bound[3], green_bound[5]])
+        green_mask = cv2.inRange(hsv_image, green_lower, green_upper)
+        
+        # 빨간색 HSV 범위
+        red_lower = np.array([red_bound[0], red_bound[2], red_bound[4]])
+        red_upper = np.array([red_bound[1], red_bound[3], red_bound[5]])
+        red_mask = cv2.inRange(hsv_image, red_lower, red_upper)
+        
+        # Contour 기반 필터링: 가장 큰 뭉친 영역의 면적 계산
+        def get_largest_contour_area(mask):
+            """마스크에서 가장 큰 contour의 면적 반환"""
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                return 0
+            largest_contour = max(contours, key=cv2.contourArea)
+            return cv2.contourArea(largest_contour)
+        
+        # 각 색상의 가장 큰 contour 면적 계산
+        green_area = get_largest_contour_area(green_mask)
+        red_area = get_largest_contour_area(red_mask)
+        
+        # 최소 면적 기준 (노이즈 제거, 픽셀 단위)
+        min_area = 100
+        
+        # 우선순위: 빨간색 > 초록색 (빨간색이 더 중요)
+        if red_area >= min_area:
+            return 2
+        elif green_area >= min_area:
+            return 1
+        else:
+            return 0
+
 #endregion
 
 #region: others

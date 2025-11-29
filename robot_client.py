@@ -159,7 +159,7 @@ async def handle_webrtc_offer(session_id, offer_dict):
         @pc.on("datachannel")
         def on_datachannel(channel: RTCDataChannel):
             webrtc_sessions[session_id].data_channel = channel
-            
+
             # 시스템 정보 전송 루프 시작
             async def system_info_loop():
                 while session_id in webrtc_sessions:
@@ -173,7 +173,7 @@ async def handle_webrtc_offer(session_id, offer_dict):
                         except Exception:
                             pass
                     await asyncio.sleep(1.0)  # 1초마다 전송
-            
+
             asyncio.create_task(system_info_loop())
 
             @channel.on("message")
@@ -183,10 +183,10 @@ async def handle_webrtc_offer(session_id, offer_dict):
                     data = json.loads(message)
                     widget_type = data.get('type')
                     widget_id = data.get('widget_id')
-                    
+
                     if not widget_id:
                         return
-                    
+
                     if widget_type == "pid_update":
                         PID_Wdata[widget_id] = {
                             "p": float(data.get('p', 0.0)),
@@ -448,7 +448,7 @@ async def send_system_info_via_webrtc(session_id):
         ram_percent = memory.percent
         ram_used = memory.used / (1024**3)  # GB
         ram_total = memory.total / (1024**3)  # GB
-        
+
         # 온도 정보 (라즈베리파이)
         temp = None
         try:
@@ -467,7 +467,7 @@ async def send_system_info_via_webrtc(session_id):
             'ram_total': round(ram_total, 2),
             'temp': round(temp, 1) if temp else None
         }
-        
+
         data_channel.send(json.dumps(system_info))
     except Exception:
         pass
