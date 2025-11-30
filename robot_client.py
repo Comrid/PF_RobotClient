@@ -7,7 +7,6 @@ import time
 import asyncio
 import signal
 from asyncio import Queue
-import cv2
 import ctypes
 from pathlib import Path
 import sys
@@ -30,6 +29,8 @@ except ImportError:
     subprocess.run(['sudo', 'pip', 'install', 'packaging', '--break-system-packages'], capture_output=True, text=True)
     from packaging.version import Version
 
+
+import cv2
 
 # 서버 연결 객체
 sio = socketio.Client()
