@@ -90,8 +90,8 @@ webrtc_sessions: dict[str, WebRTC_Manager] = {}
 # 위젯 데이터 저장소
 PID_Wdata: dict[str, dict] = {}  # {"위젯이름": {"p": 1.0, "i": 0.5, "d": 0.2}}
 Slider_Wdata: dict[str, list] = {}  # {"위젯이름": [10, 20, 30]}
-# 모바일 명령 큐 (세션별)
-Mobile_Command_Queue: dict[str, list] = {}  # {"session_id": [command_byte, ...]}
+# 모바일 명령 저장 (세션별 최신 명령만)
+Last_Command: dict[str, int] = {}  # {"session_id": command_byte}
 #endregion
 
 #region WebRTC 워커 및 초기화
@@ -184,13 +184,8 @@ async def handle_webrtc_offer(session_id, offer_dict):
                 try:
                     # 바이너리 데이터인 경우 (1바이트 명령)
                     if isinstance(message, bytes) and len(message) == 1:
-                        # 모바일 명령 큐에 추가
-                        if session_id not in Mobile_Command_Queue:
-                            Mobile_Command_Queue[session_id] = []
-                        # 큐 크기 제한 (최신 명령만 유지)
-                        if len(Mobile_Command_Queue[session_id]) > 10:
-                            Mobile_Command_Queue[session_id].pop(0)
-                        Mobile_Command_Queue[session_id].append(message[0])
+                        # 최신 명령만 저장 (큐 불필요)
+                        Last_Command[session_id] = message[0]
                         return
                     
                     # JSON 문자열로 전송된 위젯 데이터 파싱
@@ -526,40 +521,22 @@ def get_slider(widget_id: str) -> list:
     """Slider 위젯 데이터 가져오기 (항상 배열)"""
     return Slider_Wdata.get(widget_id, [])
 
-# 세션별 마지막 명령 저장 (큐가 비어있을 때 사용)
-Last_Command: dict[str, int] = {}  # {"session_id": last_command_byte}
-
 def get_command(session_id: str = None) -> int:
-    """모바일 명령 가져오기 (1바이트)
+    """모바일 명령 가져오기 (1바이트) - 최신 명령만 반환
     Args:
         session_id: 세션 ID (None이면 첫 번째 세션 사용)
     Returns:
-        int: 명령 바이트 (0-255), 큐가 비어있으면 마지막 명령 반환
+        int: 명령 바이트 (0-255), 명령이 없으면 0 반환
     """
     # session_id가 없으면 첫 번째 세션 사용
     if session_id is None:
-        if Mobile_Command_Queue:
-            session_id = list(Mobile_Command_Queue.keys())[0]
+        if Last_Command:
+            session_id = list(Last_Command.keys())[0]
         else:
-            # 세션이 없으면 마지막 명령 반환 (없으면 0)
-            if Last_Command:
-                return list(Last_Command.values())[0]
             return 0
     
-    if session_id not in Mobile_Command_Queue:
-        # 큐가 없으면 마지막 명령 반환
-        return Last_Command.get(session_id, 0)
-    
-    queue = Mobile_Command_Queue[session_id]
-    if queue:
-        # 큐에서 가장 오래된 명령 반환 (FIFO)
-        command = queue.pop(0)
-        # 마지막 명령 업데이트
-        Last_Command[session_id] = command
-        return command
-    else:
-        # 큐가 비어있으면 마지막 명령 반환 (이전 명령 유지)
-        return Last_Command.get(session_id, 0)
+    # 최신 명령 반환 (없으면 0)
+    return Last_Command.get(session_id, 0)
 #endregion
 
 #region 코드 실행
