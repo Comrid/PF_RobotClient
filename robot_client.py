@@ -90,6 +90,8 @@ webrtc_sessions: dict[str, WebRTC_Manager] = {}
 # 위젯 데이터 저장소
 PID_Wdata: dict[str, dict] = {}  # {"위젯이름": {"p": 1.0, "i": 0.5, "d": 0.2}}
 Slider_Wdata: dict[str, list] = {}  # {"위젯이름": [10, 20, 30]}
+# 모바일 명령 큐 (세션별)
+Mobile_Command_Queue: dict[str, list] = {}  # {"session_id": [command_byte, ...]}
 #endregion
 
 #region WebRTC 워커 및 초기화
@@ -180,6 +182,17 @@ async def handle_webrtc_offer(session_id, offer_dict):
             @channel.on("message")
             def on_message(message):
                 try:
+                    # 바이너리 데이터인 경우 (1바이트 명령)
+                    if isinstance(message, bytes) and len(message) == 1:
+                        # 모바일 명령 큐에 추가
+                        if session_id not in Mobile_Command_Queue:
+                            Mobile_Command_Queue[session_id] = []
+                        # 큐 크기 제한 (최신 명령만 유지)
+                        if len(Mobile_Command_Queue[session_id]) > 10:
+                            Mobile_Command_Queue[session_id].pop(0)
+                        Mobile_Command_Queue[session_id].append(message[0])
+                        return
+                    
                     # JSON 문자열로 전송된 위젯 데이터 파싱
                     data = json.loads(message)
                     widget_type = data.get('type')
@@ -577,7 +590,8 @@ def exec_code(code, session_id):
             'emit_text': emit_text,
             'print': realtime_print,
             'get_pid': get_pid,
-            'get_slider': get_slider
+            'get_slider': get_slider,
+            'get_command': lambda: get_command(session_id)
         }
         compiled_code = compile(code, '<string>', 'exec')
         exec(compiled_code, exec_namespace)

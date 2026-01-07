@@ -209,3 +209,4 @@ __marimo__/
 # Custom project files
 auto_git_push.py
 setup.sh
+/test
