@@ -525,6 +525,41 @@ def get_pid(widget_id: str) -> tuple[float | None, float | None, float | None]:
 def get_slider(widget_id: str) -> list:
     """Slider 위젯 데이터 가져오기 (항상 배열)"""
     return Slider_Wdata.get(widget_id, [])
+
+# 세션별 마지막 명령 저장 (큐가 비어있을 때 사용)
+Last_Command: dict[str, int] = {}  # {"session_id": last_command_byte}
+
+def get_command(session_id: str = None) -> int:
+    """모바일 명령 가져오기 (1바이트)
+    Args:
+        session_id: 세션 ID (None이면 첫 번째 세션 사용)
+    Returns:
+        int: 명령 바이트 (0-255), 큐가 비어있으면 마지막 명령 반환
+    """
+    # session_id가 없으면 첫 번째 세션 사용
+    if session_id is None:
+        if Mobile_Command_Queue:
+            session_id = list(Mobile_Command_Queue.keys())[0]
+        else:
+            # 세션이 없으면 마지막 명령 반환 (없으면 0)
+            if Last_Command:
+                return list(Last_Command.values())[0]
+            return 0
+    
+    if session_id not in Mobile_Command_Queue:
+        # 큐가 없으면 마지막 명령 반환
+        return Last_Command.get(session_id, 0)
+    
+    queue = Mobile_Command_Queue[session_id]
+    if queue:
+        # 큐에서 가장 오래된 명령 반환 (FIFO)
+        command = queue.pop(0)
+        # 마지막 명령 업데이트
+        Last_Command[session_id] = command
+        return command
+    else:
+        # 큐가 비어있으면 마지막 명령 반환 (이전 명령 유지)
+        return Last_Command.get(session_id, 0)
 #endregion
 
 #region 코드 실행
