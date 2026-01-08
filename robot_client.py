@@ -91,7 +91,7 @@ webrtc_sessions: dict[str, WebRTC_Manager] = {}
 PID_Wdata: dict[str, dict] = {}  # {"위젯이름": {"p": 1.0, "i": 0.5, "d": 0.2}}
 Slider_Wdata: dict[str, list] = {}  # {"위젯이름": [10, 20, 30]}
 # 모바일 명령 저장 (세션별 최신 명령만)
-Last_Command: dict[str, int] = {}  # {"session_id": command_byte}
+Last_Command: dict[str, tuple] = {}  # {"session_id": (x, y)} - signed int8 각각
 #endregion
 
 #region WebRTC 워커 및 초기화
@@ -182,10 +182,12 @@ async def handle_webrtc_offer(session_id, offer_dict):
             @channel.on("message")
             def on_message(message):
                 try:
-                    # 바이너리 데이터인 경우 (1바이트 명령)
-                    if isinstance(message, bytes) and len(message) == 1:
-                        # 최신 명령만 저장 (큐 불필요)
-                        Last_Command[session_id] = message[0]
+                    # 바이너리 데이터인 경우 (2바이트 명령: X, Y)
+                    if isinstance(message, bytes) and len(message) >= 2:
+                        # signed int8로 파싱 (X, Y)
+                        import struct
+                        x_value, y_value = struct.unpack('bb', message[:2])
+                        Last_Command[session_id] = (x_value, y_value)
                         return
 
                     # JSON 문자열로 전송된 위젯 데이터 파싱
@@ -521,22 +523,23 @@ def get_slider(widget_id: str) -> list:
     """Slider 위젯 데이터 가져오기 (항상 배열)"""
     return Slider_Wdata.get(widget_id, [])
 
-def get_command(session_id: str = None) -> int:
-    """모바일 명령 가져오기 (1바이트) - 최신 명령만 반환
+def get_command(session_id: str = None) -> tuple:
+    """모바일 명령 가져오기 (2바이트: X, Y) - 최신 명령만 반환
     Args:
         session_id: 세션 ID (None이면 첫 번째 세션 사용)
     Returns:
-        int: 명령 바이트 (0-255), 명령이 없으면 0 반환
+        tuple: (x, y) - signed int8 각각, 범위 -128~127
+               중립은 (0, 0), 명령이 없으면 (0, 0) 반환
     """
     # session_id가 없으면 첫 번째 세션 사용
     if session_id is None:
         if Last_Command:
             session_id = list(Last_Command.keys())[0]
         else:
-            return 0
-
-    # 최신 명령 반환 (없으면 0)
-    return Last_Command.get(session_id, 0)
+            return (0, 0)
+    
+    # 최신 명령 반환 (없으면 (0, 0))
+    return Last_Command.get(session_id, (0, 0))
 #endregion
 
 #region 코드 실행
